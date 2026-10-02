@@ -310,14 +310,16 @@ class MachOParser:
         # FAT binary -- pick the arm64 slice preferentially, else first slice
         if magic in (FAT_MAGIC, FAT_CIGAM):
             be = (magic == FAT_CIGAM)
-            fmt = ">I" if be else "<I"
+            endian_char = ">" if be else "<"
+            fmt = f"{endian_char}I"
+            fat_arch_fmt = f"{endian_char}IiIII"  # cputype, cpusubtype, offset, size, align
             narch = struct.unpack(fmt, d[4:8])[0]
             best_offset = None
             for i in range(min(narch, 32)):
                 pos = 8 + i * 20
                 if pos + 20 > len(d):
                     break
-                cputype, _, arch_offset, _, _ = struct.unpack(fmt * 5, d[pos:pos + 20])
+                cputype, _, arch_offset, _, _ = struct.unpack(fat_arch_fmt, d[pos:pos + 20])
                 if cputype == CPU_TYPE_ARM64:
                     best_offset = arch_offset
                     break
@@ -1486,9 +1488,12 @@ def deep_scan_ipa(ipa_dir: Path, progress=None) -> tuple[list[DeepFinding], list
         binaries.append(dylib)
 
     for binary in binaries:
-        result = deep_analyze_binary(binary)
-        all_findings.extend(result.findings)
-        all_warnings.extend(result.warnings)
+        try:
+            result = deep_analyze_binary(binary)
+            all_findings.extend(result.findings)
+            all_warnings.extend(result.warnings)
+        except Exception as e:
+            all_warnings.append(f"deep analysis failed for {binary.name}: {e}")
         if progress:
             progress()
 

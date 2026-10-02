@@ -190,6 +190,9 @@ def _run_ipa_pipeline(args, apk_path, out_dir):
     except ImportError:
         deep_warnings = ["ios_deep_analyzer not available -- deep analysis skipped"]
         print(f"    [warn] {deep_warnings[0]}")
+    except Exception as e:
+        deep_warnings = [f"deep analysis failed: {e}"]
+        print(f"    [warn] {deep_warnings[0]}")
 
     # ── Merge and deduplicate all findings ───────────────────────────────────
     source_findings = []
