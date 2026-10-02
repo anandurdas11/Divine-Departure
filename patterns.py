@@ -160,6 +160,18 @@ SOURCE_PATTERNS = [
          description="Additional root-indicator paths: /data/adb/, Magisk mount points, or su in /proc/mounts.",
          confidence="medium"),
 
+    # --- Generic Root Check Methods ---
+    dict(name="generic_root_methods", category="ROOT_DETECTION",
+         regex=_c(r"isRooted\b|checkRooted\b|isDeviceRooted|checkForRoot\b"),
+         description="Common generic method names for in-house root checks.",
+         confidence="medium"),
+
+    # --- RootCheck Module ---
+    dict(name="rootcheck_module", category="ROOT_DETECTION",
+         regex=_c(r"com\.rootcheck\.CheckAdvanceRoot|CheckAdvanceRoot\b"),
+         description="RootCheck / CheckAdvanceRoot library usage.",
+         confidence="high"),
+
     # --- SafetyNet bypass detection ---
     dict(name="safetynet_bypass_detect", category="ROOT_DETECTION",
          regex=_c(r"com\.scottyab\.safetynet|DroidGuard"),
@@ -629,6 +641,10 @@ SOURCE_PATTERNS = [
          regex=_c(r"isRaspEnabled|checkRasp|RaspManager|initRasp|RaspClient"),
          description="Generic RASP integration initialization or check method.",
          confidence="medium"),
+    dict(name="rasp_native_libs_protectt", category="RASP_DETECTION",
+         regex=_c(r"libzixcisoc\.so|liblupukkms\.so|zixcisoc|lupukkms"),
+         description="Protectt.ai RASP native watchdog libraries.",
+         confidence="high"),
 
     # --- Extended RASP vendors ---
     dict(name="talsec_freerasp", category="RASP_DETECTION",
