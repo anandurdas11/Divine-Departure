@@ -25,6 +25,7 @@ CATEGORY_LABELS = {
     "MDM_CHECK": "MDM / Device-Management Detection",
     "SSL_PINNING": "SSL / Certificate Pinning",
     "RASP_DETECTION": "RASP / App Shielding",
+    "ENFORCEMENT": "Enforcement Chokepoints",
 }
 
 IOS_CATEGORY_LABELS = {
@@ -36,11 +37,13 @@ IOS_CATEGORY_LABELS = {
     "MDM_CHECK": "MDM / Device-Management Detection",
     "SSL_PINNING": "SSL / Certificate Pinning",
     "RASP_DETECTION": "RASP / App Shielding",
+    "ENFORCEMENT": "Enforcement Chokepoints",
 }
 
 ALL_CATEGORIES = [
     "ROOT_DETECTION", "INTEGRITY_CHECK", "ANTI_DEBUG",
-    "ANTI_HOOK", "EMULATOR_DETECT", "MDM_CHECK", "SSL_PINNING", "RASP_DETECTION"
+    "ANTI_HOOK", "EMULATOR_DETECT", "MDM_CHECK", "SSL_PINNING", "RASP_DETECTION",
+    "ENFORCEMENT",
 ]
 
 # Accent colour per category -- used for summary cards, section headers, mind-map nodes.
@@ -53,6 +56,7 @@ CATEGORY_COLOR = {
     "MDM_CHECK":       "#64748b",
     "SSL_PINNING":     "#ec4899",
     "RASP_DETECTION":  "#f43f5e",
+    "ENFORCEMENT":     "#dc2626",
 }
 
 CONFIDENCE_COLOR = {

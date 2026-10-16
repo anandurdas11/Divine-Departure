@@ -7,6 +7,7 @@ Each entry:
     name        : short identifier
     category    : one of ROOT_DETECTION, INTEGRITY_CHECK, ANTI_DEBUG, ANTI_HOOK,
                   EMULATOR_DETECT, MDM_CHECK, SSL_PINNING, RASP_DETECTION,
+                  ENFORCEMENT (consequence/chokepoint primitives),
                   JAILBREAK_DETECT (iOS alias for ROOT_DETECTION)
     regex       : compiled regex used against source lines / extracted strings
     description : human-readable explanation shown in the report
@@ -29,6 +30,7 @@ CATEGORIES = [
     "MDM_CHECK",
     "SSL_PINNING",
     "RASP_DETECTION",
+    "ENFORCEMENT",        # consequence/chokepoint primitives (termination, reaction, gate)
     "JAILBREAK_DETECT",   # iOS alias; treated identically to ROOT_DETECTION
 ]
 
@@ -685,6 +687,93 @@ SOURCE_PATTERNS = [
          confidence="low"),
 
     # ====================================================================
+    # ENFORCEMENT — consequence / chokepoint primitives
+    # --------------------------------------------------------------------
+    # A RASP app ships many detectors but very few places where a failed
+    # verdict becomes an ACTION (exit / dialog / redirect / wipe). Locating
+    # those chokepoints lets a reviewer neutralise every upstream check at
+    # one point. These patterns find the consequence, not the check.
+    # (See BYPASS_METHODOLOGY.md §0–§4.)
+    # ====================================================================
+
+    # --- §1a Process termination (Java / Kotlin) -- terminal action -----
+    dict(name="enf_system_exit", category="ENFORCEMENT",
+         regex=_c(r"System\s*\.\s*exit\s*\(|Runtime\s*\.\s*getRuntime\(\)\s*\.\s*(exit|halt)\s*\("),
+         description="Terminal action: System.exit / Runtime.exit|halt — a hard kill-switch. Highest-value chokepoint.",
+         confidence="high"),
+    dict(name="enf_kill_process", category="ENFORCEMENT",
+         regex=_c(r"(android\.os\.)?Process\s*\.\s*killProcess|\.finishAffinity\s*\(|"
+                  r"kotlin\.system\.exitProcess|ExitProcessKt"),
+         description="Terminal action: killProcess / finishAffinity / kotlin exitProcess — process teardown on a failed verdict.",
+         confidence="high"),
+
+    # --- §1c User-facing reaction (dialog / redirect / block screen) ----
+    dict(name="enf_block_dialog", category="ENFORCEMENT",
+         regex=_c(r"\bAlertDialog\b|MaterialAlertDialog|\bBottomSheet\b"),
+         description="Reaction primitive: a dialog, often the 'tamper detected' block screen. Trace backward to its dispatcher.",
+         confidence="low"),
+    dict(name="enf_home_eviction", category="ENFORCEMENT",
+         regex=_c(r'Intent\(\s*"android\.intent\.action\.MAIN"|'
+                  r"addCategory\(\s*[\w.]*CATEGORY_HOME|setFlags\([^)]*FLAG_ACTIVITY"),
+         description="Reaction primitive: 'go HOME' eviction / activity redirect used to kick the user out.",
+         confidence="medium"),
+    dict(name="enf_flag_secure", category="ENFORCEMENT",
+         regex=_c(r"getWindow\(\)\s*\.\s*(setFlags|addFlags)\([^)]*FLAG_SECURE"),
+         description="Reaction primitive: FLAG_SECURE anti-screenshot response.",
+         confidence="low"),
+
+    # --- §1d Clear-data / logout reaction -------------------------------
+    dict(name="enf_clear_app_data", category="ENFORCEMENT",
+         regex=_c(r"clearApplicationUserData|ActivityManager[^;\n]*clearApplicationUserData"),
+         description="Reaction primitive: wipes the app's own data as a punitive response to a failed check.",
+         confidence="high"),
+    dict(name="enf_clear_prefs", category="ENFORCEMENT",
+         regex=_c(r"getSharedPreferences\([^)]*\)\s*\.\s*edit\(\)\s*\.\s*clear\(\)"),
+         description="Reaction primitive: clears stored credentials/session (forced logout) on a failed verdict.",
+         confidence="medium"),
+
+    # --- §2 Reaction-chain / verdict-dispatch model ---------------------
+    dict(name="enf_verdict_value_object", category="ENFORCEMENT",
+         regex=_c(r"ruleaction|ruleid|threatDetectedFlag|forceAccept|"
+                  r"vulnerabilityResponse|vulnerabilityCode|getMethodname|"
+                  r"getRedirecturl|getForceCloseTime|getClearDataFlag"),
+         description="Verdict/threat value-object fields — the data model a reaction dispatcher consumes. Hook the dispatcher, not the detectors.",
+         confidence="medium"),
+    dict(name="enf_reflective_dispatch", category="ENFORCEMENT",
+         regex=_c(r"\bequals\$default\s*\(|new\s+Gson\(\)\s*\.\s*(from|to)Json"),
+         description="Verdict (de)serialisation / native-constant comparison feeding the reaction layer.",
+         confidence="low"),
+
+    # --- §3 Dynamic-code / indirection (why static hooks miss) ----------
+    dict(name="enf_dynamic_classloader", category="ENFORCEMENT",
+         regex=_c(r"DexClassLoader|InMemoryDexClassLoader|BaseDexClassLoader|PathClassLoader"),
+         description="Dynamic DEX loading: real verdict logic lives outside base-dex classes. Prefer chokepoint + runtime tracing over per-class hooks (requires deferred/JIT hook).",
+         confidence="high"),
+    dict(name="enf_reflective_invoke", category="ENFORCEMENT",
+         regex=_c(r"getDeclaredConstructor|\.newInstance\(|Method[^;\n]*\.invoke\(|"
+                  r"Class\s*\.\s*forName\(|\.loadClass\("),
+         description="Reflective construction/invocation — indirection into dynamically-loaded code; a static class list is insufficient here.",
+         confidence="medium"),
+    dict(name="enf_native_dex_load", category="ENFORCEMENT",
+         regex=_c(r"System\s*\.\s*load(Library)?\(|getDir\(\s*[\"'](dex|temp)"),
+         description="Native library / scratch-DEX loading often used to stage the real integrity checks.",
+         confidence="medium"),
+
+    # --- §4 Launch-gate (integrity gate inside Application.onCreate) -----
+    # High-value and often missed: a one-line signing/integrity gate in the
+    # app's OWN Application class, independent of any RASP SDK.
+    dict(name="enf_launch_gate", category="ENFORCEMENT",
+         regex=_c(r"if\s*\(\s*[\w.$]+\s*\.\s*\w+\s*\(\s*this\s*\)\s*\)\s*\{\s*"
+                  r"(System\s*\.\s*exit|[\w.$]*killProcess|[\w.$]*exitProcess)"),
+         description="Launch gate: a boolean integrity check guarding a terminal action (e.g. onCreate). Cleanest bypass is forcing the gate to its genuine value, not blocking the exit.",
+         confidence="high"),
+    dict(name="enf_gate_signature_hint", category="ENFORCEMENT",
+         regex=_c(r"signingCert|signatureHash|apkHash|getCertificateHash|"
+                  r"\ballowlist\b|\bwhitelist\b"),
+         description="Gate-boolean hint: signature/hash/allowlist comparison typical of a launch-time integrity gate.",
+         confidence="medium"),
+
+    # ====================================================================
     # iOS-specific — JAILBREAK_DETECT
     # ====================================================================
     dict(name="ios_jailbreak_tools", category="JAILBREAK_DETECT",
@@ -1145,6 +1234,25 @@ PATTERN_TRIGGERS = {
     "ios_fork_jb_detect": ["darwin.fork()", "syscall(sys_fork)", "syscall(sys_ptrace)"],
     "ios_security_suite_ref": ["sandboxioschecker", "dttjailbreakdetection",
                                "iossecuritysuite"],
+
+    # --- ENFORCEMENT (triggers are necessary lowercase substrings of any match;
+    #     patterns whose only necessary literal is whitespace-separated are left
+    #     out on purpose and fall back to always-run) ---
+    "enf_kill_process": ["killprocess", "finishaffinity(", "exitprocess"],
+    "enf_block_dialog": ["alertdialog", "bottomsheet"],
+    "enf_home_eviction": ["android.intent.action.main", "category_home", "flag_activity"],
+    "enf_flag_secure": ["flag_secure"],
+    "enf_clear_app_data": ["clearapplicationuserdata"],
+    "enf_clear_prefs": ["getsharedpreferences"],
+    "enf_verdict_value_object": ["ruleaction", "ruleid", "threatdetectedflag", "forceaccept",
+                                 "vulnerabilityresponse", "vulnerabilitycode", "getmethodname",
+                                 "getredirecturl", "getforceclosetime", "getcleardataflag"],
+    "enf_reflective_dispatch": ["equals$default(", "gson()"],
+    "enf_dynamic_classloader": ["classloader"],
+    "enf_reflective_invoke": ["getdeclaredconstructor", "newinstance(", ".invoke(",
+                              "forname(", "loadclass("],
+    "enf_gate_signature_hint": ["signingcert", "signaturehash", "apkhash",
+                                "getcertificatehash", "allowlist", "whitelist"],
 }
 
 
@@ -1175,6 +1283,17 @@ def build_prefilter(patterns):
 # for in the disassembly of each .so (see native_scanner.py).
 # -----------------------------------------------------------------------
 NATIVE_INTERESTING_IMPORTS = {
+    # --- Enforcement / termination exports (§1b, §8) -- hook these libc
+    #     EXPORTS (Module.findExportByName(null, sym)) for the termination
+    #     tracer; packed RASP libs resolve libc at runtime so imports alone
+    #     under-report them.
+    "_exit":               ("ENFORCEMENT",     "high",   "_exit() -- immediate process termination; prime kill-switch to trace."),
+    "_Exit":               ("ENFORCEMENT",     "high",   "_Exit() -- immediate process termination (C99); trace for the kill-switch."),
+    "exit":                ("ENFORCEMENT",     "high",   "exit() -- process termination; trace with a backtrace to find the gate."),
+    "abort":               ("ENFORCEMENT",     "high",   "abort() -- raises SIGABRT to crash the app on a failed verdict."),
+    "tgkill":              ("ENFORCEMENT",     "high",   "tgkill() -- targeted thread kill used by native watchdogs to tear down the process."),
+    "pthread_kill":        ("ENFORCEMENT",     "medium", "pthread_kill() -- signal delivery to a thread, used in native kill reactions."),
+    "raise":               ("ENFORCEMENT",     "medium", "raise() -- self-directed signal (e.g. SIGKILL/SIGABRT) as a termination reaction."),
     "ptrace":              ("ANTI_DEBUG",      "high",   "Native ptrace() call - classic self-attach anti-debug."),
     "fork":                ("ANTI_DEBUG",      "low",    "fork() -- frequently paired with ptrace-based anti-debug watchdogs."),
     "kill":                ("ANTI_DEBUG",      "low",    "kill() -- often used to SIGSTOP/SIGKILL self or a traced child."),
@@ -1204,7 +1323,7 @@ NATIVE_INTERESTING_IMPORTS = {
 # Native string patterns (applied to strings extracted from .so rodata)
 NATIVE_STRING_PATTERNS = [p for p in SOURCE_PATTERNS if p["category"] in
                           ("ROOT_DETECTION", "ANTI_HOOK", "ANTI_DEBUG", "EMULATOR_DETECT",
-                           "SSL_PINNING", "RASP_DETECTION", "JAILBREAK_DETECT")]
+                           "SSL_PINNING", "RASP_DETECTION", "ENFORCEMENT", "JAILBREAK_DETECT")]
 
 # -----------------------------------------------------------------------
 # Dart / Flutter patterns -- applied to Blutter output (asm/*.txt, objs.txt,
