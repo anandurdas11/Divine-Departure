@@ -105,6 +105,7 @@ def parse_args():
     p.add_argument("--skip-java", action="store_true", help="Skip Java/Smali source scanning")
     p.add_argument("--skip-native", action="store_true", help="Skip native .so scanning")
     p.add_argument("--no-banner", action="store_true", help="Disable animated intro/outro banners")
+    p.add_argument("--no-progress", action="store_true", help="Disable scan progress bars")
     p.add_argument("--frida-brief", action="store_true",
                    help="Emit security_model.json + frida_prompt.md + security_mind_map.json for AI Frida-script generation")
     p.add_argument("--mindmap", action="store_true", default=True,
