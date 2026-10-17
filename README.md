@@ -80,6 +80,16 @@ frida_prompt.md
 
 These outputs provide structured findings and focused context to assist with Frida script development and dynamic testing.
 
+The security model is **enforcement-aware**: instead of only listing detectors, it ranks
+`enforcement_chokepoints` — the points where a failed verdict becomes an action
+(launch gate → terminal action → reaction dispatcher → detector). Each hook candidate
+also carries its **runtime (smali) class name** and `smali_descriptor` (de-sanitised from
+jadx display names), plus `role`, `enforcement_rank`, `requires_deferred_hook`
+(secondary-DEX / reflection timing), and `return_to_force` for boolean gates. The Frida
+prompt uses this to hook consequences before checks, resolve classes across every
+classloader, and keep a termination tracer on for verification. See
+[`BYPASS_METHODOLOGY.md`](BYPASS_METHODOLOGY.md) for the full rationale.
+
 ### Flutter Application
 
 ```bash
