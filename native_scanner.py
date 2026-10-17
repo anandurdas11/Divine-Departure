@@ -21,10 +21,22 @@ If either is missing, that stage is skipped with a clear warning rather than cra
 
 import re
 import string
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from patterns import NATIVE_INTERESTING_IMPORTS, NATIVE_STRING_PATTERNS, build_prefilter
+
+# Import nsh engine for native .so constructor emulation & secret recovery
+HAVE_NSH = False
+try:
+    _nsh_lib_path = Path(__file__).resolve().parent / "au_new_production" / "lib"
+    if _nsh_lib_path.exists() and str(_nsh_lib_path) not in sys.path:
+        sys.path.insert(0, str(_nsh_lib_path))
+    import nsh
+    HAVE_NSH = True
+except Exception:
+    HAVE_NSH = False
 
 try:
     from elftools.elf.elffile import ELFFile
@@ -286,5 +298,48 @@ def scan_native_dir(native_dir: Path, progress=None) -> tuple[list[NativeStringF
         callsite_findings.extend(cs_findings)
         if warn:
             warnings.append(warn)
+
+        # Emulate .init_array constructors via nsh to reconstruct hidden/obfuscated std::strings
+        if HAVE_NSH and so_path.suffix.lower() == ".so":
+            try:
+                # Prefer 64-bit ARM for constructor emulation
+                abi_str = str(so_path).lower()
+                is_preferred_abi = ("arm64" in abi_str or "v8a" in abi_str) or not any(
+                    x in abi_str for x in ("armeabi", "x86", "x86_64")
+                )
+                if is_preferred_abi:
+                    so_res = nsh.analyze_so(str(so_path), emu_on=True)
+                    # 1. Emulated C++ std::string globals
+                    for emu_item in so_res.get("emulated", []):
+                        sym_name = emu_item.get("symbol", "unknown")
+                        val_str = emu_item.get("value", "")
+                        addr_str = emu_item.get("addr", "0x0")
+                        addr_val = int(addr_str, 16) if isinstance(addr_str, str) and addr_str.startswith("0x") else 0
+                        string_findings.append(NativeStringFinding(
+                            so_path=str(so_path),
+                            pattern_name=f"so_reconstructed_secret_{sym_name}",
+                            category="HARDCODED_SECRETS",
+                            description=f"Reconstructed native std::string global constructor secret: {sym_name}",
+                            confidence="high",
+                            file_offset=addr_val,
+                            matched_string=f"{sym_name} = '{val_str}'",
+                        ))
+                    # 2. Static secrets surfaced from SO
+                    for static_item in so_res.get("static_hits", []):
+                        kind = static_item.get("kind", "Secret")
+                        s_val = static_item.get("value", "")
+                        s_off = static_item.get("off", "0x0")
+                        off_val = int(s_off, 16) if isinstance(s_off, str) and s_off.startswith("0x") else 0
+                        string_findings.append(NativeStringFinding(
+                            so_path=str(so_path),
+                            pattern_name="so_embedded_credential",
+                            category="HARDCODED_SECRETS",
+                            description=f"Embedded credential in native shared library: {kind}",
+                            confidence="high",
+                            file_offset=off_val,
+                            matched_string=s_val,
+                        ))
+            except Exception as ex:
+                warnings.append(f"nsh emulation error on {so_path.name}: {ex}")
 
     return string_findings, callsite_findings, warnings
