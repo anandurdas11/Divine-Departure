@@ -1,13 +1,16 @@
 """
 report.py
 
-Renders all collected findings (source-level + native-level) into a single
-self-contained HTML file -- no external CSS/JS dependencies, easy to attach to a
-pentest report or open directly in a browser.
-
-When a Frida brief was produced (`--frida-brief`), the report also gets an inline,
-collapsible "Security Mind-Map" (category -> class -> method hook points) plus an
-action bar linking to security_model.json / frida_prompt.md / the patched APK.
+Renders all collected findings (source-level + native-level) into a single,
+self-contained, executive-grade cybersecurity dashboard HTML file.
+Features:
+- Professional Dark / Light mode toggle with persistent preference
+- Executive KPI summary HUD (Total Findings, Risk Posture, Confidence breakdown, Defense Vectors)
+- Interactive category summary cards with smooth scroll navigation
+- Real-time live search & multi-facet filtering (by signature, file, snippet, confidence)
+- 1-click clipboard copy for code snippets, file paths, and executive summary
+- Interactive D3 Security Mind-Map with side-drawer Frida hook generator
+- High-contrast, clean printable stylesheet for PDF exports and client deliverables
 """
 
 import html
@@ -48,9 +51,8 @@ ALL_CATEGORIES = [
     "ENFORCEMENT", "HARDCODED_SECRETS",
 ]
 
-# Accent colour per category -- used for summary cards, section headers, mind-map nodes.
 CATEGORY_COLOR = {
-    "ROOT_DETECTION":  "#e5484d",
+    "ROOT_DETECTION":  "#ef4444",
     "INTEGRITY_CHECK": "#a855f7",
     "ANTI_DEBUG":      "#3b82f6",
     "ANTI_HOOK":       "#14b8a6",
@@ -63,129 +65,770 @@ CATEGORY_COLOR = {
 }
 
 CONFIDENCE_COLOR = {
-    "high": "#e5484d",
+    "high": "#ef4444",
     "medium": "#f59e0b",
-    "low": "#94a3b8",
+    "low": "#64748b",
 }
 
 CSS = """
 :root {
-  --bg: #f5f6f9; --panel: #ffffff; --ink: #1b2230; --muted: #64748b;
-  --line: #e6e9ef; --code-bg: #eef1f6; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.05);
-  --accent: #7c5cff; --accent2: #22d3ee;
+  --bg: #090d16;
+  --bg-gradient: radial-gradient(circle at 50% 0%, #151d30 0%, #090d16 85%);
+  --panel: #0f172a;
+  --panel-hover: #162035;
+  --card-bg: #111a2e;
+  --card-border: #1e293b;
+  --card-hover-border: #334155;
+  --line: #1e293b;
+  --ink: #f1f5f9;
+  --ink-secondary: #cbd5e1;
+  --muted: #94a3b8;
+  --dim: #64748b;
+  --code-bg: #030712;
+  --code-ink: #38bdf8;
+  --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
+  --accent: #7c5cff;
+  --accent-gradient: linear-gradient(135deg, #7c5cff 0%, #a855f7 50%, #22d3ee 100%);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --info: #3b82f6;
+  --th-bg: #0d1526;
+  --tr-alt: #0b1120;
+  --tr-hover: #162238;
 }
+
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --bg-gradient: radial-gradient(circle at 50% 0%, #ffffff 0%, #f1f5f9 85%);
+  --panel: #ffffff;
+  --panel-hover: #f8fafc;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --card-hover-border: #cbd5e1;
+  --line: #e2e8f0;
+  --ink: #0f172a;
+  --ink-secondary: #334155;
+  --muted: #64748b;
+  --dim: #94a3b8;
+  --code-bg: #f1f5f9;
+  --code-ink: #0369a1;
+  --shadow: 0 2px 10px rgba(15, 23, 42, 0.05), 0 10px 25px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --accent: #6d28d9;
+  --accent-gradient: linear-gradient(135deg, #6d28d9 0%, #7c3aed 50%, #0284c7 100%);
+  --danger: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.08);
+  --warning: #d97706;
+  --warning-bg: rgba(217, 119, 6, 0.08);
+  --success: #059669;
+  --success-bg: rgba(5, 150, 105, 0.08);
+  --info: #2563eb;
+  --th-bg: #f8fafc;
+  --tr-alt: #fcfdfe;
+  --tr-hover: #f1f5f9;
+}
+
 * { box-sizing: border-box; }
-body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  background-image: var(--bg-gradient);
+  color: var(--ink);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
 
-header { background: linear-gradient(120deg, #1a0b2e 0%, #241146 45%, #0b2b3a 100%); color: #fff;
-  padding: 30px 34px 26px; border-bottom: 3px solid var(--accent); }
-header h1 { margin: 0 0 6px; font-size: 20px; font-weight: 700; letter-spacing: .01em; }
-header .brand { font-weight: 800; background: linear-gradient(90deg, #b388ff, #64ffda);
-  -webkit-background-clip: text; background-clip: text; color: transparent; }
-header .meta { color: #b7c4d6; font-size: 12.5px; }
+/* ---- Modern HUD Header ---- */
+.hud-header {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--line);
+  padding: 22px 36px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  transition: background .2s, border-color .2s;
+}
+[data-theme="light"] .hud-header {
+  background: rgba(255, 255, 255, 0.88);
+}
+.hud-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.brand-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1e1b4b, #311042);
+  border: 1px solid #7c5cff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 20px rgba(124, 92, 255, 0.35);
+  flex-shrink: 0;
+}
+.brand-titles h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-titles .brand-text {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+.hud-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+}
+.meta-chip code {
+  color: var(--accent);
+  font-weight: 600;
+}
+.hud-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 
-.container { padding: 26px 34px 40px; max-width: 1180px; margin: 0 auto; }
+/* Header utility buttons */
+.hud-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--card-bg);
+  color: var(--ink-secondary);
+  border: 1px solid var(--card-border);
+  padding: 8px 14px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all .15s ease;
+  box-shadow: var(--shadow);
+}
+.hud-btn:hover {
+  background: var(--panel-hover);
+  border-color: var(--accent);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+.hud-btn.primary {
+  background: var(--accent-gradient);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 4px 15px rgba(124, 92, 255, 0.4);
+}
+.hud-btn.primary:hover {
+  filter: brightness(1.1);
+}
 
-/* action bar */
-.actionbar { display: flex; flex-wrap: wrap; gap: 10px; margin: -14px 0 26px; }
-.btn { display: inline-flex; align-items: center; gap: 7px; text-decoration: none;
-  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 9px;
-  padding: 9px 15px; font-size: 13px; font-weight: 600; box-shadow: var(--shadow); transition: transform .06s ease, border-color .15s; }
-.btn:hover { transform: translateY(-1px); border-color: var(--accent); }
-.btn.primary { background: linear-gradient(120deg, var(--accent), #9b7bff); color: #fff; border-color: transparent; }
-.btn .i { font-size: 15px; line-height: 1; }
+/* ---- Main Container ---- */
+.container {
+  padding: 32px 36px 60px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
 
-/* summary cards */
-.summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; margin-bottom: 30px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 15px 17px;
-  box-shadow: var(--shadow); border-left: 4px solid var(--muted); display: block; text-decoration: none; color: inherit;
-  transition: transform .06s ease, border-color .15s, box-shadow .15s; }
-a.card:hover { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(16,24,40,.08), 0 14px 30px rgba(16,24,40,.1); }
-a.card:hover .label { color: var(--ink); }
-.card .num { font-size: 25px; font-weight: 800; letter-spacing: -.01em; }
-.card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-.card.total { border-left-color: var(--accent); background: linear-gradient(120deg, #ffffff, #f3efff); }
-:target > h2, h2:target { animation: dd-flash 1.4s ease-out; }
-@keyframes dd-flash { 0% { background: #fff3bf; } 100% { background: transparent; } }
+/* ---- Action Bar ---- */
+.actionbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  background: var(--panel);
+  color: var(--ink-secondary);
+  border: 1px solid var(--card-border);
+  border-radius: 9px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  transition: all .15s ease;
+}
+.btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+}
+.btn.primary {
+  background: var(--accent-gradient);
+  color: #fff;
+  border-color: transparent;
+}
+.btn .i { font-size: 14px; line-height: 1; }
 
-h2 { font-size: 17px; margin: 40px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
-  display: flex; align-items: center; gap: 10px; }
-h2 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
-h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
-  margin: 22px 0 8px; font-weight: 700; }
+/* ---- Executive KPI Dashboard ---- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.kpi-card {
+  background: var(--panel);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 18px 22px;
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+  transition: transform .15s ease, border-color .15s ease;
+}
+.kpi-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--card-hover-border);
+}
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--kpi-accent, var(--accent));
+}
+.kpi-label {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.kpi-val {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  line-height: 1;
+}
+.kpi-sub {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--dim);
+}
 
-table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); margin-bottom: 10px; }
-th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; vertical-align: top; }
-tr:last-child td { border-bottom: none; }
-tbody tr:hover { background: #fafbfe; }
-th { background: #f7f8fb; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
-code { background: var(--code-bg); padding: 1.5px 6px; border-radius: 5px; font-size: 11.5px;
-  font-family: "SF Mono", "Cascadia Code", Consolas, monospace; word-break: break-all; }
+/* Posture Progress Bar */
+.posture-bar-wrapper {
+  background: var(--panel);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+  margin-bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.posture-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+.posture-track {
+  height: 10px;
+  background: var(--code-bg);
+  border-radius: 999px;
+  overflow: hidden;
+  display: flex;
+  gap: 2px;
+}
+.posture-seg {
+  height: 100%;
+  transition: width .4s ease;
+}
 
-.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; }
-.empty { color: var(--muted); font-style: italic; padding: 10px 2px; font-size: 13px; }
-.warnings { background: #fffaf0; border: 1px solid #f3dca6; border-radius: 12px; padding: 13px 17px; margin-bottom: 24px; font-size: 12.5px; }
-.warnings ul { margin: 6px 0 0; padding-left: 18px; }
-.warnings li { margin: 3px 0; white-space: pre-wrap; }
-footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26px; }
+/* ---- Category Summary Cards ---- */
+.summary-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  font-weight: 800;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 14px 18px;
+  box-shadow: var(--shadow);
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  transition: all .15s ease;
+}
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-lg);
+}
+.card .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.card .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.card .num {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+}
+.card .label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: .01em;
+  transition: color .15s ease;
+}
+.card:hover .label {
+  color: var(--ink);
+}
 
-/* ---- Security Mind-Map ---- */
-.mindmap { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-  box-shadow: var(--shadow); padding: 8px 6px; margin-bottom: 10px; }
-.mindmap details { border-radius: 8px; }
-.mindmap > details { margin: 4px 2px; }
-.mindmap summary { cursor: pointer; list-style: none; padding: 8px 10px; border-radius: 8px;
-  display: flex; align-items: center; gap: 9px; font-size: 13px; user-select: none; }
-.mindmap summary::-webkit-details-marker { display: none; }
-.mindmap summary:hover { background: #f6f7fb; }
-.mindmap summary .chev { transition: transform .15s ease; color: var(--muted); font-size: 11px; }
-.mindmap details[open] > summary .chev { transform: rotate(90deg); }
-.mm-cat > summary { font-weight: 700; }
-.mm-pill { margin-left: auto; font-size: 10.5px; color: var(--muted); background: var(--code-bg);
-  padding: 1px 8px; border-radius: 999px; font-weight: 600; }
-.mm-jump { font-size: 10.5px; font-weight: 600; color: var(--accent); text-decoration: none;
-  margin-left: 10px; white-space: nowrap; }
-.mm-jump:hover { text-decoration: underline; }
-.mm-class { margin: 2px 0 2px 22px; border-left: 2px solid var(--line); }
-.mm-class > summary { font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: #334155; }
-.mm-methods { margin: 2px 0 8px 34px; display: flex; flex-direction: column; gap: 3px; }
-.mm-method { font-family: "SF Mono", Consolas, monospace; font-size: 11.5px; color: #475569;
-  display: flex; align-items: center; gap: 8px; padding: 2px 0; }
-.mm-method .cdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.mm-method .src { color: var(--muted); font-size: 10.5px; margin-left: auto; }
-.mm-hints { margin: 4px 0 10px 34px; font-size: 11.5px; color: var(--muted); }
-.mm-hints li { margin: 2px 0; }
-.mm-note { font-size: 11px; color: var(--muted); padding: 6px 12px; }
+/* ---- Live Interactive Search & Filter Controls ---- */
+.filter-toolbar {
+  background: var(--panel);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+  margin-bottom: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.filter-row-primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+.search-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 280px;
+  max-width: 600px;
+}
+.search-wrapper input {
+  width: 100%;
+  background: var(--code-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 9px;
+  padding: 10px 14px 10px 38px;
+  color: var(--ink);
+  font-size: 13.5px;
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.search-wrapper input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.2);
+}
+.search-wrapper .search-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--dim);
+  pointer-events: none;
+}
+.filter-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.filter-pill {
+  background: var(--code-bg);
+  border: 1px solid var(--card-border);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.filter-pill:hover, .filter-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.filter-stats {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
 
-/* ---- Divine Departure intro overlay ---- */
-#dd-overlay { position: fixed; inset: 0; z-index: 9999;
-  background: radial-gradient(ellipse at center, #1a0b2e 0%, #05030a 80%);
-  display: flex; align-items: center; justify-content: center; flex-direction: column;
-  animation: dd-fadeout 0.8s ease-in forwards; animation-delay: 2.4s; }
-#dd-overlay .dd-title { font-size: 40px; font-weight: 800; letter-spacing: 0.12em;
-  background: linear-gradient(90deg, #b388ff, #64ffda, #b388ff); background-size: 200% auto;
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  animation-fill-mode: forwards; animation-name: dd-rise, dd-glow, dd-sheen;
-  animation-duration: 0.9s, 1.8s, 3s; animation-timing-function: ease-out, ease-in-out, linear;
-  animation-iteration-count: 1, infinite, infinite; }
-#dd-overlay .dd-sub { margin-top: 10px; font-size: 12px; letter-spacing: 0.3em; color: #7f8c8d;
-  text-transform: uppercase; opacity: 0; animation: dd-rise 0.9s ease-out 0.4s forwards; }
-@keyframes dd-rise { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@keyframes dd-glow { 0%,100% { filter: drop-shadow(0 0 6px rgba(179,136,255,.5)); } 50% { filter: drop-shadow(0 0 22px rgba(100,255,218,.75)); } }
-@keyframes dd-sheen { 0% { background-position: 0% center; } 100% { background-position: 200% center; } }
-@keyframes dd-fadeout { from { opacity: 1; visibility: visible; } to { opacity: 0; visibility: hidden; } }
-@media print { #dd-overlay { display: none; } .btn { display: none; } }
+/* ---- Headings & Content Sections ---- */
+.category-section {
+  margin-bottom: 44px;
+  scroll-margin-top: 100px;
+}
+h2 {
+  font-size: 18px;
+  margin: 0 0 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+}
+.h2-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+h2 .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.h2-top-link {
+  font-size: 11px;
+  color: var(--dim);
+  text-decoration: none;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  border-radius: 6px;
+  transition: all .15s;
+}
+.h2-top-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+h3 {
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  margin: 20px 0 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
-/* ---- Interactive D3 Mind Map Container & HUD ---- */
-.mm-interactive-card {
-  background: #090d16;
-  border: 1px solid #1e293b;
+/* ---- Polished Data Tables ---- */
+.table-card {
+  background: var(--panel);
+  border: 1px solid var(--card-border);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  box-shadow: var(--shadow);
+  margin-bottom: 22px;
+}
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+}
+th {
+  background: var(--th-bg);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 700;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  vertical-align: middle;
+  color: var(--ink-secondary);
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tbody tr {
+  transition: background .12s ease;
+}
+tbody tr:nth-child(even) {
+  background: var(--tr-alt);
+}
+tbody tr:hover {
+  background: var(--tr-hover);
+}
+
+code {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  padding: 2.5px 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  word-break: break-all;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+[data-theme="light"] code {
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+.snippet-box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+.snippet-text {
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+.copy-inline-btn {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  transition: color .12s, background .12s;
+}
+.copy-inline-btn:hover {
+  color: var(--accent);
+  background: var(--card-border);
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.badge-high {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.badge-high .badge-dot { background: var(--danger); }
+.badge-medium {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.badge-medium .badge-dot { background: var(--warning); }
+.badge-low {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+.badge-low .badge-dot { background: var(--muted); }
+
+/* Empty State Card */
+.empty-card {
+  padding: 24px;
+  text-align: center;
+  color: var(--dim);
+  font-size: 13px;
+  font-style: normal;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.empty-card svg {
+  color: var(--dim);
+  opacity: 0.6;
+}
+
+/* Warnings box */
+.warnings {
+  background: var(--warning-bg);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 28px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.warnings strong {
+  color: var(--warning);
+}
+.warnings ul { margin: 8px 0 0; padding-left: 20px; }
+.warnings li { margin: 4px 0; }
+
+footer {
+  text-align: center;
+  color: var(--dim);
+  font-size: 12px;
+  padding: 40px 20px;
+  border-top: 1px solid var(--line);
+  margin-top: 60px;
+}
+
+/* ---- Security Mind-Map ---- */
+.mindmap {
+  background: var(--panel);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
   margin-bottom: 24px;
+}
+.mindmap details { border-radius: 8px; }
+.mindmap > details { margin: 6px 2px; }
+.mindmap summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  user-select: none;
+  transition: background .12s;
+}
+.mindmap summary::-webkit-details-marker { display: none; }
+.mindmap summary:hover { background: var(--panel-hover); }
+.mindmap summary .chev { transition: transform .15s ease; color: var(--dim); font-size: 11px; }
+.mindmap details[open] > summary .chev { transform: rotate(90deg); }
+.mm-cat > summary { font-weight: 700; }
+.mm-pill {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.mm-jump {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 12px;
+  white-space: nowrap;
+}
+.mm-jump:hover { text-decoration: underline; }
+.mm-class { margin: 4px 0 4px 24px; border-left: 2px solid var(--line); }
+.mm-class > summary { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: var(--ink-secondary); }
+.mm-methods { margin: 4px 0 10px 36px; display: flex; flex-direction: column; gap: 4px; }
+.mm-method {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.mm-method .cdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.mm-method .src { color: var(--dim); font-size: 11px; margin-left: auto; }
+.mm-hints { margin: 6px 0 12px 36px; font-size: 12px; color: var(--muted); }
+.mm-hints li { margin: 3px 0; }
+.mm-note { font-size: 12px; color: var(--dim); padding: 8px 14px; }
+
+/* ---- D3 Mind Map Container & HUD ---- */
+.mm-interactive-card {
+  background: #090d16;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  margin-bottom: 30px;
   position: relative;
 }
 .mm-toolbar {
@@ -202,25 +845,23 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   position: relative;
   min-width: 260px;
   flex: 1;
-  max-width: 400px;
+  max-width: 420px;
 }
 .mm-search-box input {
   width: 100%;
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 8px;
-  padding: 7px 12px 7px 32px;
+  padding: 8px 12px 8px 34px;
   color: #f8fafc;
   font-size: 13px;
   outline: none;
   transition: border-color .15s;
 }
-.mm-search-box input:focus {
-  border-color: #7c5cff;
-}
+.mm-search-box input:focus { border-color: #7c5cff; }
 .mm-search-box .icon {
   position: absolute;
-  left: 10px;
+  left: 11px;
   top: 50%;
   transform: translateY(-50%);
   color: #64748b;
@@ -228,19 +869,14 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
 }
 .mm-match-count {
   position: absolute;
-  right: 10px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
   font-size: 11px;
   color: #94a3b8;
   font-weight: 600;
 }
-.mm-pills {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
+.mm-pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .mm-pill-btn {
   background: #1e293b;
   border: 1px solid #334155;
@@ -257,17 +893,13 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   border-color: #7c5cff;
   color: #fff;
 }
-.mm-actions {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
+.mm-actions { display: flex; gap: 6px; align-items: center; }
 .mm-btn {
   background: #1e293b;
   border: 1px solid #334155;
   color: #cbd5e1;
   border-radius: 6px;
-  padding: 5px 9px;
+  padding: 6px 10px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -276,10 +908,7 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   gap: 5px;
   transition: background .12s;
 }
-.mm-btn:hover {
-  background: #334155;
-  color: #fff;
-}
+.mm-btn:hover { background: #334155; color: #fff; }
 .mm-viewport {
   position: relative;
   background: radial-gradient(circle at 50% 50%, #0d1527 0%, #090d16 100%);
@@ -287,35 +916,23 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   width: 100%;
   overflow: hidden;
 }
-.mm-viewport svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
+.mm-viewport svg { width: 100%; height: 100%; display: block; }
 .mm-node text {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 500;
   fill: #e2e8f0;
   cursor: pointer;
   user-select: none;
 }
-.mm-node circle {
-  cursor: pointer;
-  transition: r .2s, stroke-width .2s;
-}
-.mm-link {
-  fill: none;
-  stroke: #334155;
-  stroke-width: 1.5px;
-  stroke-opacity: 0.65;
-}
+.mm-node circle { cursor: pointer; transition: r .2s, stroke-width .2s; }
+.mm-link { fill: none; stroke: #334155; stroke-width: 1.5px; stroke-opacity: 0.65; }
+
+/* Drawer */
 .mm-drawer {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 380px;
+  top: 0; right: 0; bottom: 0;
+  width: 400px;
   max-width: 90%;
   background: #0f172a;
   border-left: 1px solid #1e293b;
@@ -326,9 +943,7 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   display: flex;
   flex-direction: column;
 }
-.mm-drawer.open {
-  transform: translateX(0);
-}
+.mm-drawer.open { transform: translateX(0); }
 .mm-drawer-header {
   padding: 16px 20px;
   border-bottom: 1px solid #1e293b;
@@ -340,13 +955,11 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   background: transparent;
   border: none;
   color: #94a3b8;
-  font-size: 20px;
+  font-size: 22px;
   cursor: pointer;
   line-height: 1;
 }
-.mm-drawer-close:hover {
-  color: #fff;
-}
+.mm-drawer-close:hover { color: #fff; }
 .mm-drawer-body {
   padding: 20px;
   overflow-y: auto;
@@ -355,17 +968,13 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   flex-direction: column;
   gap: 16px;
   color: #cbd5e1;
-  font-size: 12.5px;
+  font-size: 13px;
 }
-.mm-drawer-field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
+.mm-drawer-field { display: flex; flex-direction: column; gap: 5px; }
 .mm-drawer-label {
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: .06em;
   color: #64748b;
   font-weight: 700;
 }
@@ -373,9 +982,9 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   background: #020617;
   border: 1px solid #1e293b;
   border-radius: 8px;
-  padding: 10px 12px;
-  font-family: "SF Mono", Consolas, monospace;
-  font-size: 11.5px;
+  padding: 12px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px;
   color: #38bdf8;
   position: relative;
   word-break: break-all;
@@ -387,28 +996,127 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
   border: 1px solid #334155;
   color: #e2e8f0;
   border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 11px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
   cursor: pointer;
   margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all .12s;
 }
-.mm-copy-btn:hover {
-  background: #334155;
-}
+.mm-copy-btn:hover { background: #334155; }
 .mm-tooltip {
   position: absolute;
   display: none;
-  background: rgba(15, 23, 42, 0.94);
+  background: rgba(15, 23, 42, 0.95);
   border: 1px solid #334155;
   color: #f8fafc;
   padding: 8px 12px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 11.5px;
   pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   z-index: 100;
   max-width: 280px;
   line-height: 1.4;
+}
+
+/* Intro overlay */
+#dd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: radial-gradient(ellipse at center, #1a0b2e 0%, #05030a 85%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  animation: dd-fadeout 0.6s ease-in forwards;
+  animation-delay: 1.4s;
+  pointer-events: none;
+}
+#dd-overlay .dd-title {
+  font-size: 38px;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  background: linear-gradient(90deg, #b388ff, #64ffda, #b388ff);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: dd-glow 1.5s ease-in-out infinite, dd-sheen 2.5s linear infinite;
+}
+#dd-overlay .dd-sub {
+  margin-top: 10px;
+  font-size: 12px;
+  letter-spacing: 0.35em;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+@keyframes dd-glow {
+  0%,100% { filter: drop-shadow(0 0 8px rgba(179,136,255,.5)); }
+  50% { filter: drop-shadow(0 0 24px rgba(100,255,218,.75)); }
+}
+@keyframes dd-sheen { 0% { background-position: 0% center; } 100% { background-position: 200% center; } }
+@keyframes dd-fadeout {
+  from { opacity: 1; visibility: visible; }
+  to { opacity: 0; visibility: hidden; }
+}
+
+/* Toast Notification */
+#dd-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #10b981;
+  color: #ffffff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all .2s ease;
+  z-index: 10000;
+  pointer-events: none;
+}
+#dd-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Print Optimization */
+@media print {
+  #dd-overlay, .hud-controls, .actionbar, .filter-toolbar, .mm-toolbar, .h2-top-link, .copy-inline-btn {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt !important;
+  }
+  .hud-header {
+    position: static !important;
+    background: none !important;
+    border-bottom: 2px solid #000000 !important;
+    padding: 10px 0 !important;
+  }
+  .brand-text {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+  }
+  .kpi-card, .table-card, .card {
+    border: 1px solid #cccccc !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+  }
+  table { border: 1px solid #dddddd !important; }
+  th { background: #eeeeee !important; color: #000000 !important; }
+  td { border-bottom: 1px solid #eeeeee !important; color: #000000 !important; }
+  code { background: #f5f5f5 !important; color: #000000 !important; border: 1px solid #e0e0e0 !important; }
 }
 """
 
@@ -418,66 +1126,118 @@ def _esc(s):
 
 
 def _badge(confidence):
-    color = CONFIDENCE_COLOR.get(confidence, "#94a3b8")
-    return f'<span class="badge" style="background:{color}">{_esc(str(confidence).upper())}</span>'
+    conf_str = str(confidence).lower()
+    label = conf_str.upper()
+    css_class = f"badge-{conf_str}" if conf_str in ("high", "medium", "low") else "badge-low"
+    return (
+        f'<span class="badge {css_class}">'
+        f'<span class="badge-dot"></span>{_esc(label)}'
+        f'</span>'
+    )
+
+
+def _copy_btn(text):
+    safe_text = _esc(text).replace('"', '&quot;').replace("'", "&#39;")
+    return (
+        f'<button class="copy-inline-btn" title="Copy to clipboard" data-copy="{safe_text}" onclick="copyValue(this)">'
+        f'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        f'<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>'
+        f'<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>'
+        f'</svg>'
+        f'</button>'
+    )
+
+
+def _empty_state(msg):
+    return (
+        f'<div class="table-card"><div class="empty-card">'
+        f'<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">'
+        f'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>'
+        f'</svg>'
+        f'<div>{_esc(msg)}</div>'
+        f'</div></div>'
+    )
 
 
 def _source_table(findings):
     if not findings:
-        return '<div class="empty">No findings in this category.</div>'
+        return _empty_state("No decompiled source findings in this category.")
     rows = []
     for f in findings:
+        conf_lower = str(f.confidence).lower()
+        search_blob = f"{f.file_path} {f.pattern_name} {f.description} {f.snippet}".lower()
         rows.append(
-            f"<tr><td>{_badge(f.confidence)}</td>"
-            f"<td><code>{_esc(f.file_path)}</code>:{f.line_number}</td>"
-            f"<td>{_esc(f.pattern_name)}</td>"
-            f"<td>{_esc(f.description)}</td>"
-            f"<td><code>{_esc(f.snippet)}</code></td></tr>"
+            f'<tr class="finding-row" data-category="{_esc(f.category)}" data-confidence="{_esc(conf_lower)}" data-search="{_esc(search_blob)}">'
+            f'<td>{_badge(f.confidence)}</td>'
+            f'<td>'
+            f'<div class="snippet-box">'
+            f'<code>{_esc(f.file_path)}:{f.line_number}</code>{_copy_btn(f"{f.file_path}:{f.line_number}")}'
+            f'</div>'
+            f'</td>'
+            f'<td><strong style="color:var(--ink);">{_esc(f.pattern_name)}</strong></td>'
+            f'<td>{_esc(f.description)}</td>'
+            f'<td>'
+            f'<div class="snippet-box">'
+            f'<span class="snippet-text"><code>{_esc(f.snippet)}</code></span>{_copy_btn(f.snippet)}'
+            f'</div>'
+            f'</td></tr>'
         )
     return (
-        "<table><thead><tr><th>Confidence</th><th>File : Line</th><th>Signature</th>"
-        "<th>Description</th><th>Matched line</th></tr></thead><tbody>"
-        + "".join(rows) + "</tbody></table>"
+        '<div class="table-card"><table><thead><tr>'
+        '<th>Confidence</th><th>File : Line</th><th>Signature</th><th>Description</th><th>Matched Line</th>'
+        '</tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>"
     )
 
 
 def _native_string_table(findings):
     if not findings:
-        return '<div class="empty">No native string findings in this category.</div>'
+        return _empty_state("No native string findings in this category.")
     rows = []
     for f in findings:
+        conf_lower = str(f.confidence).lower()
+        so_name = Path(f.so_path).name
+        search_blob = f"{so_name} {f.pattern_name} {f.description} {f.matched_string}".lower()
         rows.append(
-            f"<tr><td>{_badge(f.confidence)}</td>"
-            f"<td><code>{_esc(Path(f.so_path).name)}</code></td>"
-            f"<td>0x{f.file_offset:x}</td>"
-            f"<td>{_esc(f.pattern_name)}</td>"
-            f"<td>{_esc(f.description)}</td>"
-            f"<td><code>{_esc(f.matched_string)}</code></td></tr>"
+            f'<tr class="finding-row" data-category="{_esc(f.category)}" data-confidence="{_esc(conf_lower)}" data-search="{_esc(search_blob)}">'
+            f'<td>{_badge(f.confidence)}</td>'
+            f'<td><div class="snippet-box"><code>{_esc(so_name)}</code>{_copy_btn(so_name)}</div></td>'
+            f'<td><code>0x{f.file_offset:x}</code></td>'
+            f'<td><strong style="color:var(--ink);">{_esc(f.pattern_name)}</strong></td>'
+            f'<td>{_esc(f.description)}</td>'
+            f'<td>'
+            f'<div class="snippet-box">'
+            f'<span class="snippet-text"><code>{_esc(f.matched_string)}</code></span>{_copy_btn(f.matched_string)}'
+            f'</div>'
+            f'</td></tr>'
         )
     return (
-        "<table><thead><tr><th>Confidence</th><th>Library</th><th>File Offset</th>"
-        "<th>Signature</th><th>Description</th><th>Matched string</th></tr></thead><tbody>"
-        + "".join(rows) + "</tbody></table>"
+        '<div class="table-card"><table><thead><tr>'
+        '<th>Confidence</th><th>Native Library</th><th>File Offset</th><th>Signature</th><th>Description</th><th>Matched String</th>'
+        '</tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>"
     )
 
 
 def _native_callsite_table(findings):
     if not findings:
-        return '<div class="empty">No native call-site findings in this category.</div>'
+        return _empty_state("No native call-site findings in this category.")
     rows = []
     for f in findings:
+        conf_lower = str(f.confidence).lower()
+        so_name = Path(f.so_path).name
+        search_blob = f"{so_name} {f.calling_function} {f.imported_symbol} {f.description}".lower()
         rows.append(
-            f"<tr><td>{_badge(f.confidence)}</td>"
-            f"<td><code>{_esc(Path(f.so_path).name)}</code></td>"
-            f"<td>{_esc(f.calling_function)}</td>"
-            f"<td>0x{f.call_instruction_address:x}</td>"
-            f"<td>{_esc(f.imported_symbol)}()</td>"
-            f"<td>{_esc(f.description)}</td></tr>"
+            f'<tr class="finding-row" data-category="{_esc(f.category)}" data-confidence="{_esc(conf_lower)}" data-search="{_esc(search_blob)}">'
+            f'<td>{_badge(f.confidence)}</td>'
+            f'<td><div class="snippet-box"><code>{_esc(so_name)}</code>{_copy_btn(so_name)}</div></td>'
+            f'<td><code>{_esc(f.calling_function)}</code></td>'
+            f'<td><code>0x{f.call_instruction_address:x}</code></td>'
+            f'<td><strong style="color:var(--accent);">{_esc(f.imported_symbol)}()</strong></td>'
+            f'<td>{_esc(f.description)}</td></tr>'
         )
     return (
-        "<table><thead><tr><th>Confidence</th><th>Library</th><th>Calling Function</th>"
-        "<th>Call Address</th><th>Target Import</th><th>Description</th></tr></thead><tbody>"
-        + "".join(rows) + "</tbody></table>"
+        '<div class="table-card"><table><thead><tr>'
+        '<th>Confidence</th><th>Library</th><th>Calling Function</th><th>Call Address</th><th>Target Import</th><th>Description</th>'
+        '</tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>"
     )
 
 
@@ -486,27 +1246,32 @@ def _patch_section(patch_records):
     if patch_records is None:
         return ""
     if not patch_records:
-        body = '<div class="empty">Patch mode ran but made no changes.</div>'
+        body = _empty_state("Patch mode was executed but no defensive checks were modified.")
     else:
         rows = []
         for r in patch_records:
             rows.append(
-                f"<tr><td>{_esc(r.get('category', ''))}</td>"
+                f"<tr><td><strong>{_esc(r.get('category', ''))}</strong></td>"
                 f"<td><code>{_esc(r.get('location', ''))}</code></td>"
-                f"<td>{_esc(r.get('action', ''))}</td>"
+                f"<td><span class=\"badge badge-high\"><span class=\"badge-dot\"></span>{_esc(r.get('action', ''))}</span></td>"
                 f"<td>{_esc(r.get('detail', ''))}</td></tr>"
             )
         body = (
-            "<table><thead><tr><th>Category</th><th>Location</th><th>Action</th>"
-            "<th>Detail</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+            '<div class="table-card"><table><thead><tr><th>Category</th><th>Location</th><th>Action</th>'
+            '<th>Detail</th></tr></thead><tbody>' + "".join(rows) + '</tbody></table></div>'
         )
-    return f'<h2 id="patchlog"><span class="dot" style="background:#e5484d"></span>APK Patch Log &mdash; neutralised checks</h2>{body}'
+    return (
+        f'<div class="category-section">'
+        f'<h2 id="patchlog"><div class="h2-left"><span class="dot" style="background:#ef4444"></span>'
+        f'Binary &amp; Bytecode Neutralisation Log (Patched Checks)</div>'
+        f'<a class="h2-top-link" href="#">&#8593; Top</a></h2>{body}</div>'
+    )
 
 
 def _action_bar(security_model, frida_json_name, frida_prompt_name, patched_apk_name, mindmap_json_name=None):
     btns = []
     if security_model is not None:
-        btns.append('<a class="btn primary" href="#mindmap"><span class="i">&#129504;</span>Security Mind-Map</a>')
+        btns.append('<a class="btn primary" href="#mindmap"><span class="i">&#129504;</span>Interactive Security Mind-Map</a>')
     mm_name = mindmap_json_name or (security_model and security_model.get("mindmap_json_name"))
     if mm_name:
         btns.append(f'<a class="btn" href="{_esc(mm_name)}" target="_blank">'
@@ -516,10 +1281,10 @@ def _action_bar(security_model, frida_json_name, frida_prompt_name, patched_apk_
                     f'<span class="i">&#128190;</span>security_model.json</a>')
     if frida_prompt_name:
         btns.append(f'<a class="btn" href="{_esc(frida_prompt_name)}" target="_blank">'
-                    f'<span class="i">&#9889;</span>Frida prompt</a>')
+                    f'<span class="i">&#9889;</span>Frida Prompt &amp; Script</a>')
     if patched_apk_name:
         btns.append(f'<a class="btn" href="{_esc(patched_apk_name)}">'
-                    f'<span class="i">&#128230;</span>Patched APK</a>')
+                    f'<span class="i">&#128230;</span>Patched Package ({_esc(patched_apk_name)})</a>')
     if not btns:
         return ""
     return f'<div class="actionbar">{"".join(btns)}</div>'
@@ -535,10 +1300,12 @@ def _mindmap_section(security_model):
     mechs = security_model.get("defense_mechanisms", [])
 
     head = (
-        '<h2 id="mindmap"><span class="dot" style="background:var(--accent)"></span>'
-        'Interactive Security Mind-Map &mdash; Attack Surface &amp; Defense Tree</h2>'
-        f'<div class="mm-note">Click any node to inspect details and copy Frida hooks in the slide-out drawer. '
-        f'Full structured data: <a href="{_esc(mm_json_name)}" target="_blank" style="color:var(--accent); font-weight:600;"><code>{_esc(mm_json_name)}</code></a> '
+        '<div class="category-section" id="mindmap">'
+        '<h2><div class="h2-left"><span class="dot" style="background:var(--accent)"></span>'
+        'Interactive Security Mind-Map &mdash; Attack Surface &amp; Defense Tree</div>'
+        '<a class="h2-top-link" href="#">&#8593; Top</a></h2>'
+        f'<div class="mm-note" style="margin-bottom:12px;">Click any node to inspect details and copy Frida hooks in the slide-out drawer. '
+        f'Full structured models: <a href="{_esc(mm_json_name)}" target="_blank" style="color:var(--accent); font-weight:600;"><code>{_esc(mm_json_name)}</code></a> '
         f'&nbsp;|&nbsp; <code>security_model.json</code>.</div>'
     )
 
@@ -599,7 +1366,7 @@ def _mindmap_section(security_model):
     if not mindmap_data:
         empty_note = '<div class="mm-note">No defensive mechanisms mapped.</div>'
         content = "".join(blocks) if blocks else empty_note
-        return head + f'<div class="mindmap">{content}</div>'
+        return head + f'<div class="mindmap">{content}</div></div>'
 
     raw_json_str = json.dumps(mindmap_data).replace("</script>", "<\\/script>").replace("<", "\\u003c")
 
@@ -608,7 +1375,7 @@ def _mindmap_section(security_model):
     <div class="mm-toolbar">
       <div class="mm-search-box">
         <span class="icon">&#128269;</span>
-        <input type="text" id="mm-search-input" placeholder="Search classes, hooks, methods, secrets..." oninput="mmFilterSearch(this.value)">
+        <input type="text" id="mm-search-input" placeholder="Search mind-map classes, hooks, methods, secrets..." oninput="mmFilterSearch(this.value)">
         <span id="mm-match-count" class="mm-match-count"></span>
       </div>
       <div class="mm-pills">
@@ -636,7 +1403,7 @@ def _mindmap_section(security_model):
       <div id="mm-tooltip" class="mm-tooltip"></div>
       <div id="mm-drawer" class="mm-drawer">
         <div class="mm-drawer-header">
-          <span id="mm-drawer-badge" class="badge" style="background:#7c5cff">INFO</span>
+          <span id="mm-drawer-badge" class="badge badge-high">INFO</span>
           <button class="mm-drawer-close" onclick="mmCloseDrawer()">&times;</button>
         </div>
         <div class="mm-drawer-body">
@@ -676,7 +1443,7 @@ def _mindmap_section(security_model):
 
     const colors = {
       root: "#7c5cff",
-      ROOT_DETECTION: "#e5484d",
+      ROOT_DETECTION: "#ef4444",
       INTEGRITY_CHECK: "#a855f7",
       ANTI_DEBUG: "#3b82f6",
       ANTI_HOOK: "#14b8a6",
@@ -711,7 +1478,7 @@ def _mindmap_section(security_model):
       root.x0 = height / 2;
       root.y0 = 0;
 
-      // Collapse level 2+ by default to avoid clutter
+      // Collapse level 2+ by default to avoid initial clutter
       if (root.children) {
         root.children.forEach(group => {
           if (group.children) {
@@ -841,6 +1608,7 @@ def _mindmap_section(security_model):
       const catColor = colors[data.category] || '#7c5cff';
       badge.textContent = (data.category || 'INFO').toUpperCase();
       badge.style.background = catColor;
+      badge.style.color = '#fff';
 
       title.textContent = data.name || "Details";
       fullname.textContent = data.full_name || data.name || "N/A";
@@ -890,11 +1658,12 @@ def _mindmap_section(security_model):
       const el = document.getElementById(elemId);
       if (!el) return;
       navigator.clipboard.writeText(el.textContent).then(() => {
+        showToast("Frida hook copied to clipboard");
         const btn = document.querySelector(".mm-copy-btn");
         if (btn) {
-          const old = btn.textContent;
-          btn.textContent = "✓ Copied!";
-          setTimeout(() => btn.textContent = old, 1800);
+          const old = btn.innerHTML;
+          btn.innerHTML = "&#10003; Copied!";
+          setTimeout(() => btn.innerHTML = old, 1800);
         }
       });
     };
@@ -1020,7 +1789,121 @@ def _mindmap_section(security_model):
   </script>
   """.replace("__MINDMAP_DATA__", raw_json_str)
 
-    return head + interactive_template + accordion_html + js_code
+    return head + interactive_template + accordion_html + js_code + "</div>"
+
+
+
+DASHBOARD_JS = """
+<script>
+// Theme Management
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  try { localStorage.setItem('dd_theme', next); } catch(e){}
+  updateThemeUI(next);
+}
+
+function updateThemeUI(theme) {
+  const lbl = document.getElementById('theme-label');
+  if (lbl) lbl.textContent = theme === 'dark' ? 'Light Mode' : 'Dark Mode';
+}
+
+(function initTheme() {
+  let saved = 'dark';
+  try { saved = localStorage.getItem('dd_theme') || 'dark'; } catch(e){}
+  document.documentElement.setAttribute('data-theme', saved);
+  updateThemeUI(saved);
+})();
+
+// Toast Notification
+function showToast(msg) {
+  const t = document.getElementById('dd-toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// Inline Copy Helper
+window.copyValue = function(btn) {
+  const val = btn.getAttribute('data-copy');
+  if (!val) return;
+  navigator.clipboard.writeText(val).then(() => {
+    showToast("Copied to clipboard");
+    const originalSvg = btn.innerHTML;
+    btn.innerHTML = '<span style="color:#10b981; font-size:11px; font-weight:bold;">&#10003;</span>';
+    setTimeout(() => { btn.innerHTML = originalSvg; }, 1400);
+  });
+};
+
+// Copy Executive Summary
+window.copyExecutiveSummary = function() {
+  const el = document.getElementById('exec-summary-data');
+  const summary = el ? el.textContent : "DIVINE DEPARTURE ASSESSMENT";
+  navigator.clipboard.writeText(summary).then(() => {
+    showToast("Executive summary copied to clipboard!");
+  });
+};
+
+// Filter & Live Search Logic
+let activeConfidence = 'all';
+
+window.filterByConfidence = function(conf, btn) {
+  document.querySelectorAll('.conf-pill').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  activeConfidence = conf;
+  applyFindingsFilter();
+};
+
+window.resetAllFilters = function() {
+  const searchInput = document.getElementById('global-search');
+  if (searchInput) searchInput.value = '';
+  document.querySelectorAll('.conf-pill').forEach(b => b.classList.remove('active'));
+  const allBtn = document.querySelector('.conf-pill[data-conf="all"]');
+  if (allBtn) allBtn.classList.add('active');
+  activeConfidence = 'all';
+  applyFindingsFilter();
+};
+
+window.applyFindingsFilter = function() {
+  const searchInput = document.getElementById('global-search');
+  const q = (searchInput ? searchInput.value : '').toLowerCase().trim();
+  const rows = document.querySelectorAll('.finding-row');
+  let matchCount = 0;
+
+  rows.forEach(r => {
+    const rConf = r.getAttribute('data-confidence');
+    const rSearch = r.getAttribute('data-search') || '';
+
+    const matchConf = (activeConfidence === 'all' || rConf === activeConfidence);
+    const matchQuery = (!q || rSearch.includes(q));
+
+    if (matchConf && matchQuery) {
+      r.style.display = '';
+      matchCount++;
+    } else {
+      r.style.display = 'none';
+    }
+  });
+
+  // Toggle category section visibility if all rows inside are hidden
+  document.querySelectorAll('.category-section').forEach(sec => {
+    const secRows = sec.querySelectorAll('.finding-row');
+    if (secRows.length > 0) {
+      const visible = sec.querySelectorAll('.finding-row:not([style*="display: none"])').length;
+      sec.style.display = visible > 0 ? '' : 'none';
+    }
+  });
+
+  const countLabel = document.getElementById('filter-match-count');
+  if (countLabel) {
+    countLabel.textContent = 'Showing ' + matchCount + ' of ' + rows.length + ' findings';
+  }
+};
+</script>
+"""
 
 
 def build_report(apk_name, source_findings, native_string_findings, native_callsite_findings,
@@ -1040,24 +1923,49 @@ def build_report(apk_name, source_findings, native_string_findings, native_calls
 
     total = sum(cat_counts.values())
 
+    all_findings = list(source_findings) + list(native_string_findings) + list(native_callsite_findings)
+    high_count = sum(1 for f in all_findings if str(getattr(f, 'confidence', '')).lower() == 'high')
+    medium_count = sum(1 for f in all_findings if str(getattr(f, 'confidence', '')).lower() == 'medium')
+    low_count = sum(1 for f in all_findings if str(getattr(f, 'confidence', '')).lower() == 'low')
+    vectors_count = sum(1 for cat in all_categories if cat_counts[cat] > 0)
+
+    # Posture rating
+    if high_count >= 5:
+        posture_badge = '<span class="badge badge-high"><span class="badge-dot"></span>HIGH RESISTANCE</span>'
+        posture_color = "var(--danger)"
+    elif high_count > 0 or medium_count >= 5:
+        posture_badge = '<span class="badge badge-medium"><span class="badge-dot"></span>MODERATE DEFENSES</span>'
+        posture_color = "var(--warning)"
+    elif total > 0:
+        posture_badge = '<span class="badge badge-low"><span class="badge-dot"></span>BASELINE / MINIMAL</span>'
+        posture_color = "var(--info)"
+    else:
+        posture_badge = '<span class="badge badge-low"><span class="badge-dot"></span>NO DETECTIONS</span>'
+        posture_color = "var(--dim)"
+
+    # Percentages for posture track
+    pct_high = (high_count / total * 100) if total else 0
+    pct_med = (medium_count / total * 100) if total else 0
+    pct_low = (low_count / total * 100) if total else 0
+
+    # Summary Cards
     summary_cards = "".join(
-        f'<a class="card" href="#cat-{cat}" style="border-left-color:{CATEGORY_COLOR.get(cat, "#64748b")}">'
-        f'<div class="num">{cat_counts.get(cat, 0)}</div>'
+        f'<a class="card" href="#cat-{cat}">'
+        f'<div class="card-head">'
+        f'<span class="dot" style="background:{CATEGORY_COLOR.get(cat, "#64748b")}"></span>'
+        f'<div class="num" style="color:{CATEGORY_COLOR.get(cat, "#64748b")}">{cat_counts.get(cat, 0)}</div>'
+        f'</div>'
         f'<div class="label">{_esc(labels[cat])}</div></a>'
         for cat in all_categories
-    )
-    summary_cards += (
-        f'<div class="card total"><div class="num">{total}</div>'
-        f'<div class="label">Total Findings</div></div>'
     )
 
     warnings_html = ""
     if warnings:
         items = "".join(f"<li>{_esc(w)}</li>" for w in warnings)
-        warnings_html = f'<div class="warnings"><strong>Notes / tool warnings:</strong><ul>{items}</ul></div>'
+        warnings_html = f'<div class="warnings"><strong>Tool Execution Notes / Scanner Warnings:</strong><ul>{items}</ul></div>'
 
-    platform_label = "Jailbreak" if platform == "ios" else "Root"
-    source_label = "Decompiled Objective-C / Swift / Binary strings" if platform == "ios" else "Decompiled Java / Smali source"
+    platform_label = "iOS Application" if platform == "ios" else "Android APK / AAB"
+    source_label = "Decompiled Objective-C / Swift / Binary symbols" if platform == "ios" else "Decompiled Java &amp; Smali Bytecode Patterns"
 
     sections = []
     for cat in all_categories:
@@ -1065,50 +1973,193 @@ def build_report(apk_name, source_findings, native_string_findings, native_calls
         nstr = [f for f in native_string_findings if f.category == cat]
         ncall = [f for f in native_callsite_findings if f.category == cat]
         color = CATEGORY_COLOR.get(cat, "#64748b")
+        cat_total = len(src) + len(nstr) + len(ncall)
 
-        sections.append(f'<h2 id="cat-{cat}"><span class="dot" style="background:{color}"></span>'
-                        f'{_esc(labels[cat])}</h2>')
-        sections.append(f"<h3>{source_label}</h3>")
-        sections.append(_source_table(src))
+        sec_html = [
+            f'<div class="category-section" id="cat-{cat}">'
+            f'<h2><div class="h2-left">'
+            f'<span class="dot" style="background:{color}"></span>'
+            f'{_esc(labels[cat])}'
+            f'<span class="badge badge-low" style="margin-left:8px;">{cat_total} findings</span>'
+            f'</div>'
+            f'<a class="h2-top-link" href="#">&#8593; Top</a></h2>'
+        ]
+        sec_html.append(f"<h3>{source_label}</h3>")
+        sec_html.append(_source_table(src))
         if nstr:
-            sections.append("<h3>Native library &mdash; string references</h3>")
-            sections.append(_native_string_table(nstr))
+            sec_html.append("<h3>Native Library &mdash; Hardcoded Defense String References</h3>")
+            sec_html.append(_native_string_table(nstr))
         if ncall:
-            sections.append("<h3>Native library &mdash; disassembled call sites</h3>")
-            sections.append(_native_callsite_table(ncall))
+            sec_html.append("<h3>Native Library &mdash; Disassembled Call Sites &amp; C Imports</h3>")
+            sec_html.append(_native_callsite_table(ncall))
+        sec_html.append('</div>')
+        sections.append("".join(sec_html))
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    header_subtitle = f"{platform_label} / Integrity / Anti-Tamper / MDM / SSL-Pinning Analysis"
+
+    exec_summary_plain = (
+        f"DIVINE DEPARTURE SECURITY ASSESSMENT REPORT\\n"
+        f"Target: {apk_name}\\n"
+        f"Platform: {platform_label}\\n"
+        f"Generated: {generated_at}\\n"
+        f"Total Findings: {total}\\n"
+        f"High Confidence: {high_count} | Medium: {medium_count} | Low: {low_count}\\n"
+        f"Active Defense Vectors: {vectors_count} of 10\\n"
+    )
 
     html_doc = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DIVINE DEPARTURE -- {_esc(apk_name)}</title>
+<title>DIVINE DEPARTURE &mdash; {_esc(apk_name)} Audit Report</title>
 <style>{CSS}</style>
 </head>
 <body>
+
 <div id="dd-overlay">
   <div class="dd-title">DIVINE DEPARTURE</div>
-  <div class="dd-sub">scan complete</div>
+  <div class="dd-sub">Security Audit &amp; Reverse Engineering Report</div>
 </div>
-<header>
-  <h1><span class="brand">DIVINE DEPARTURE</span> &mdash; {header_subtitle}</h1>
-  <div class="meta">Target: {_esc(apk_name)} &nbsp;|&nbsp; Generated: {generated_at}</div>
+
+<header class="hud-header">
+  <div class="hud-inner">
+    <div class="brand-group">
+      <div class="brand-logo">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          <path d="m9 12 2 2 4-4"></path>
+        </svg>
+      </div>
+      <div class="brand-titles">
+        <h1><span class="brand-text">DIVINE DEPARTURE</span> <span style="font-size:14px; color:var(--muted); font-weight:500;">/ Security Posture Assessment</span></h1>
+        <div class="hud-meta-row">
+          <span class="meta-chip">Target: <code>{_esc(apk_name)}</code></span>
+          <span class="meta-chip">Platform: <code>{_esc(platform_label)}</code></span>
+          <span class="meta-chip">Generated: <code>{generated_at}</code></span>
+        </div>
+      </div>
+    </div>
+    <div class="hud-controls">
+      <button class="hud-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Dark/Light Theme">
+        <svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <span id="theme-label">Light Mode</span>
+      </button>
+      <button class="hud-btn" onclick="copyExecutiveSummary()" title="Copy executive summary to clipboard">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        Copy Summary
+      </button>
+      <button class="hud-btn" onclick="window.print()" title="Export PDF / Print Report">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 6 2 18 2 18 9"></polyline>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+          <rect x="6" y="14" width="12" height="8"></rect>
+        </svg>
+        Export PDF
+      </button>
+    </div>
+  </div>
 </header>
+
 <div class="container">
   {_action_bar(security_model, frida_json_name, frida_prompt_name, patched_apk_name)}
+
+  <!-- KPI Posture HUD -->
+  <div class="kpi-grid">
+    <div class="kpi-card" style="--kpi-accent: var(--accent);">
+      <div class="kpi-label">Total Detections <span>&#128065;</span></div>
+      <div class="kpi-val">{total}</div>
+      <div class="kpi-sub">Across source bytecode &amp; native libraries</div>
+    </div>
+    <div class="kpi-card" style="--kpi-accent: var(--danger);">
+      <div class="kpi-label">High Confidence Findings <span>&#128293;</span></div>
+      <div class="kpi-val" style="color:var(--danger);">{high_count}</div>
+      <div class="kpi-sub">Definite anti-tamper &amp; active checks</div>
+    </div>
+    <div class="kpi-card" style="--kpi-accent: var(--warning);">
+      <div class="kpi-label">Medium Confidence <span>&#9888;</span></div>
+      <div class="kpi-val" style="color:var(--warning);">{medium_count}</div>
+      <div class="kpi-sub">Heuristic signatures &amp; suspicious symbols</div>
+    </div>
+    <div class="kpi-card" style="--kpi-accent: {posture_color};">
+      <div class="kpi-label">Security Posture Rating <span>&#128737;</span></div>
+      <div style="margin-top:6px;">{posture_badge}</div>
+      <div class="kpi-sub" style="margin-top:10px;">{vectors_count} of 10 defense vectors identified</div>
+    </div>
+  </div>
+
+  <!-- Confidence Distribution Meter -->
+  <div class="posture-bar-wrapper">
+    <div class="posture-header">
+      <span>Confidence Distribution: {high_count} High ({pct_high:.0f}%) &middot; {medium_count} Medium ({pct_med:.0f}%) &middot; {low_count} Low ({pct_low:.0f}%)</span>
+      <span>{vectors_count} Defense Categories Active</span>
+    </div>
+    <div class="posture-track">
+      <div class="posture-seg" style="width:{pct_high}%; background:var(--danger);" title="High Confidence: {high_count}"></div>
+      <div class="posture-seg" style="width:{pct_med}%; background:var(--warning);" title="Medium Confidence: {medium_count}"></div>
+      <div class="posture-seg" style="width:{pct_low}%; background:var(--dim);" title="Low Confidence: {low_count}"></div>
+    </div>
+  </div>
+
+  <div class="summary-title">&#9632; Security Defense Vectors &mdash; Quick Jump Matrix</div>
   <div class="summary">{summary_cards}</div>
+
   {warnings_html}
+
+  <!-- Live Finding Search & Filter Toolbar -->
+  <div class="filter-toolbar">
+    <div class="filter-row-primary">
+      <div class="search-wrapper">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="global-search" placeholder="Filter findings by signature, class name, snippet, or description..." oninput="applyFindingsFilter()">
+      </div>
+      <div class="filter-stats" id="filter-match-count">Showing all {total} findings</div>
+    </div>
+    <div class="filter-pills-row">
+      <span style="font-size:11.5px; color:var(--dim); font-weight:700; text-transform:uppercase; margin-right:4px;">Confidence:</span>
+      <button class="filter-pill active conf-pill" data-conf="all" onclick="filterByConfidence('all', this)">All</button>
+      <button class="filter-pill conf-pill" data-conf="high" onclick="filterByConfidence('high', this)">High ({high_count})</button>
+      <button class="filter-pill conf-pill" data-conf="medium" onclick="filterByConfidence('medium', this)">Medium ({medium_count})</button>
+      <button class="filter-pill conf-pill" data-conf="low" onclick="filterByConfidence('low', this)">Low ({low_count})</button>
+      <button class="filter-pill" style="margin-left:auto;" onclick="resetAllFilters()">Reset Filters</button>
+    </div>
+  </div>
+
   {_mindmap_section(security_model)}
   {_patch_section(patch_records)}
   {''.join(sections)}
 </div>
-<footer>Generated by DIVINE DEPARTURE &mdash; findings require manual verification before inclusion in a client report.</footer>
+
+<div id="dd-toast">Notification</div>
+<div id="exec-summary-data" style="display:none;">{_esc(exec_summary_plain)}</div>
+
+<footer>
+  <strong>DIVINE DEPARTURE</strong> &mdash; Reverse Engineering &amp; AppSec Posture Suite.<br>
+  All findings are produced via static heuristic signature analysis and require dynamic validation before inclusion in formal compliance reports.
+</footer>
+
+{DASHBOARD_JS}
+
 </body>
 </html>"""
 
     out_path = Path(out_path)
     out_path.write_text(html_doc, encoding="utf-8")
     return out_path
+
