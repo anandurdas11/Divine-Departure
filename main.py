@@ -45,17 +45,36 @@ from report import build_report
 # ANSI colors
 _PURPLE = "\033[95m"
 _CYAN = "\033[96m"
+_BLUE = "\033[94m"
+_WHITE = "\033[97m"
 _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _RESET = "\033[0m"
 
-_INTRO_ART = r"""
-   _____ _____ _    _____ _   _ ______   ____  ______ _____  ___    ____ _______ _    _ _____  ______
-  |  __ \_   _| |  / /_ _| \ | |  ____| |  _ \|  ____|  __ \/ _ \  |  _ \__   __| |  | |  __ \|  ____|
-  | |  | || | | | | | | ||  \| | |__    | | | | |__  | |__) | |_| | |_) | | |  | |  | | |__) | |__
-  | |  | || | | | | | | || . ` |  __|   | | | |  __| |  ___/\__, |  _ <  | |  | |  | |  _  /|  __|
-  | |__| || |_| |__/ |_| || |\  | |____  | |__| | |____| |     / /| |_) | | |  | |__| | | \ \| |____
-  |_____/_____|_____|___||_| \_|______| |_____/|______|_|    /_/ |____/  |_|   \____/|_|  \_\______|
+_LOGO_BANNER_TEMPLATE = """
+                          {_PURPLE}====*{_WHITE}#{_CYAN}****{_PURPLE}#{_WHITE}#{_CYAN}*{_PURPLE}-{_RESET}                        
+                     {_PURPLE}.=+-+{_WHITE}%%%@@@@%%@@@@%{_PURPLE}*+=-{_RESET}                    
+        {_PURPLE}...........:-+{_WHITE}@@{_CYAN}++{_WHITE}@@@@@{_PURPLE}*.   ={_WHITE}@@@@@%#{_BLUE}={_PURPLE}.{_BLUE}.{_RESET}                 
+  {_PURPLE}..     {_BLUE} {_PURPLE} {_BLUE} ..     {_PURPLE}   .:::*#+:.. {_BLUE} {_PURPLE} .:+{_WHITE}@@@@@%@@#{_PURPLE}-{_BLUE}.:{_RESET}               
+        {_BLUE}:{_PURPLE}           {_BLUE}    {_PURPLE}      {_BLUE} {_PURPLE}   {_BLUE}   {_PURPLE}.:={_WHITE}%%#@@@%@{_PURPLE}*{_BLUE}-.-:{_RESET}            
+    {_BLUE}.{_CYAN}+{_BLUE}=={_CYAN}#*{_BLUE}-{_PURPLE}       {_BLUE}       {_PURPLE}       {_BLUE}..{_PURPLE} {_BLUE}  {_PURPLE} :{_CYAN}={_PURPLE}::={_CYAN}#{_WHITE}#%{_CYAN}#{_WHITE}#%{_CYAN}*{_BLUE}- ..{_RESET} {_CYAN}+{_RESET}         
+   {_BLUE}:{_CYAN}+{_WHITE}#{_CYAN}=**+={_PURPLE}      {_BLUE}       {_PURPLE}   {_BLUE}  {_PURPLE}  {_BLUE}.{_WHITE}%{_CYAN}+{_BLUE}.{_PURPLE}   -{_WHITE}@@%#{_CYAN}***+*{_WHITE}##{_CYAN}*{_BLUE}={_CYAN}={_BLUE}-:. {_CYAN}=+{_RESET}      
+  {_BLUE}.--{_CYAN}+{_RESET} {_BLUE}-={_RESET} {_PURPLE}    {_BLUE} .....      {_PURPLE}  {_BLUE}  -{_WHITE}%@{_BLUE}-{_CYAN}={_BLUE}:  {_PURPLE} .+{_WHITE}%{_CYAN}*+#{_PURPLE}#=-{_WHITE}#@{_CYAN}*{_BLUE}-={_CYAN}+***{_BLUE}--{_CYAN}+{_BLUE}: {_RESET}   
+    {_BLUE}--{_CYAN}+=+*{_BLUE}.{_PURPLE}.:.:: {_BLUE}  {_PURPLE}  {_BLUE}    ::{_PURPLE}  {_BLUE}.-{_CYAN}+{_WHITE}@{_CYAN}+{_BLUE}--.{_PURPLE} {_BLUE} :{_PURPLE}..-+{_CYAN}#{_BLUE}=: .{_PURPLE}*+ {_BLUE}  {_RESET} {_CYAN}+*{_WHITE}@#{_CYAN}*{_BLUE}=== {_RESET} 
+    {_BLUE}={_CYAN}+*=++{_BLUE}:{_RESET}    {_PURPLE}-:.  {_BLUE}. {_PURPLE}   {_BLUE} {_WHITE}%{_CYAN}#{_BLUE} {_PURPLE}  {_BLUE}.{_WHITE}@{_CYAN}+{_BLUE} {_PURPLE}  {_BLUE}.{_CYAN}**{_BLUE} {_PURPLE}   ::{_BLUE}-:..{_PURPLE}-{_BLUE} {_PURPLE} {_RESET} {_BLUE}-:{_CYAN}-*{_WHITE}@@{_CYAN}+{_BLUE}-{_CYAN}*{_BLUE}={_RESET} 
+   {_BLUE}-={_CYAN}=={_BLUE}={_CYAN}++{_BLUE}=:{_RESET}   {_PURPLE}:{_BLUE}-{_CYAN}*={_PURPLE}-=.{_BLUE}=..{_CYAN}*{_WHITE}@{_BLUE}-  {_PURPLE} {_BLUE}:{_WHITE}@{_BLUE}-.{_PURPLE} {_BLUE}  ={_WHITE}@{_CYAN}*{_BLUE}.  {_PURPLE} .-{_BLUE}.{_PURPLE}-={_BLUE}.::.:{_CYAN}***{_WHITE}@@{_CYAN}*+{_BLUE}:-{_RESET} 
+   {_BLUE}.{_RESET} {_BLUE} .::::.{_RESET}  {_BLUE}...{_PURPLE}.{_BLUE} :-{_CYAN}+{_BLUE}:{_CYAN}+{_WHITE}@%{_BLUE}:   .{_WHITE}#@{_BLUE}-{_CYAN}+{_BLUE}.   :{_WHITE}%%{_BLUE}- :.=:.-:{_CYAN}+{_WHITE}%{_CYAN}*{_WHITE}@@@@%{_CYAN}+{_BLUE}-.:.{_RESET} 
+            {_BLUE}   :--={_CYAN}*+=*{_WHITE}@@{_BLUE}.  {_PURPLE} {_BLUE} .={_WHITE}%{_CYAN}*{_BLUE}-. {_PURPLE} {_BLUE} .:{_WHITE}%%{_CYAN}*=**=+***#{_WHITE}%%{_CYAN}+={_BLUE}::=-{_RESET}    
+         {_BLUE}.-::-={_WHITE}%{_CYAN}+{_BLUE}==---={_CYAN}*{_WHITE}##{_CYAN}+{_BLUE}-:..{_CYAN}*+{_BLUE}..:-{_CYAN}+#*{_BLUE}-={_CYAN}+{_WHITE}#%%%%{_CYAN}*=+++{_BLUE}-  :.{_RESET} {_CYAN}-{_RESET}    
+        {_BLUE}---{_PURPLE}*{_BLUE}:.:-{_CYAN}+***={_BLUE}    {_WHITE}##{_CYAN}+*{_WHITE}##{_CYAN}*+=*{_WHITE}##{_CYAN}*+++{_BLUE}.{_CYAN}=**{_BLUE}=::-{_CYAN}={_BLUE}=.:::.{_CYAN}++{_RESET}       
+     {_BLUE}::--{_PURPLE}.  {_BLUE} {_PURPLE}..-{_BLUE}:.-=:={_CYAN}+{_BLUE}:.:   :{_CYAN}+**+={_BLUE}=. ..-{_CYAN}+*={_BLUE}--::--=:={_CYAN}+{_BLUE}--.{_RESET}        
+      {_BLUE}.{_PURPLE}={_BLUE}={_PURPLE}   {_BLUE} . :-... :--{_CYAN}={_BLUE}--: :--{_WHITE}%{_CYAN}-{_BLUE}:::.::::..:{_CYAN}+=**++{_PURPLE}::=-{_CYAN}={_BLUE}:{_RESET} {_BLUE}--{_RESET}     
+   {_BLUE}:{_CYAN}-{_RESET}   {_CYAN}*{_BLUE}  .. .... .. .:. :::. .{_WHITE}#{_CYAN}+{_BLUE}.    .      {_PURPLE}...: {_BLUE} {_PURPLE}  {_RESET} {_PURPLE} {_RESET}         
+   {_BLUE}:{_CYAN}-+{_WHITE}%{_BLUE}--{_CYAN}*{_BLUE}-=-{_CYAN}+{_PURPLE} ={_BLUE}-{_CYAN}*{_BLUE}:=.-:{_CYAN}={_BLUE}-. ={_CYAN}*{_BLUE}:==:{_CYAN}={_BLUE}:.-={_CYAN}+{_BLUE}:=: {_CYAN}+{_BLUE}-=-{_CYAN}+{_BLUE}::{_CYAN}={_BLUE} {_CYAN}+{_BLUE}-{_CYAN}+*{_BLUE}:-{_CYAN}*+=-{_BLUE}:{_RESET}  
+     {_BLUE}={_WHITE}@{_BLUE}.:{_WHITE}%{_BLUE}-{_CYAN}*{_BLUE}:{_CYAN}=+{_PURPLE}={_BLUE}:{_CYAN}+{_BLUE}-{_CYAN}+=+{_BLUE}-{_CYAN}#{_BLUE}:.{_RESET} {_CYAN}+{_WHITE}#{_PURPLE} {_BLUE}-{_WHITE}%{_BLUE}={_WHITE}#{_BLUE}-.{_CYAN}#{_BLUE}={_CYAN}+{_BLUE}={_PURPLE}+{_CYAN}+{_BLUE}:{_CYAN}*++{_BLUE}.{_WHITE}#{_BLUE}:={_CYAN}*{_BLUE}:{_CYAN}+{_BLUE}={_CYAN}**{_BLUE}-={_WHITE}#{_BLUE}-:{_RESET}    
+   {_BLUE}:-{_CYAN}+*=+{_BLUE}: -.{_RESET} {_BLUE}-{_RESET} {_BLUE}:::.{_RESET} {_BLUE}:.-:..---=:---.:{_PURPLE} {_BLUE}.{_CYAN}={_BLUE} :-:.-.-.{_RESET} {_BLUE}--:::.--{_CYAN}++={_BLUE}::{_RESET}  
+  {_BLUE}.:{_RESET}     {_BLUE}.:...{_RESET} {_BLUE}-:{_RESET} {_BLUE}.::.. ...{_RESET}  {_BLUE}:.{_RESET} {_PURPLE}.{_BLUE}...... : ..:.{_RESET}  {_BLUE}::{_RESET}  {_BLUE}.... {_RESET}     {_BLUE}.{_RESET}  
+       {_BLUE}....::::{_RESET} {_BLUE}.:...........:.......{_RESET} {_BLUE}..........{_RESET} {_BLUE}::::::....{_RESET}      
 """
 
 _OUTRO_ART = r"""
@@ -70,17 +89,26 @@ _OUTRO_ART = r"""
 """
 
 
-def _typewriter(text, delay=0.0006):
-    for ch in text:
-        sys.stdout.write(ch)
+def _typewriter(text, delay=0.015):
+    for line in text.splitlines(keepends=True):
+        sys.stdout.write(line)
         sys.stdout.flush()
-        time.sleep(delay)
+        if delay > 0:
+            time.sleep(delay)
 
 
 def print_intro_banner():
-    print(f"{_PURPLE}{_BOLD}", end="")
-    _typewriter(_INTRO_ART, delay=0.0004)
-    print(f"{_RESET}{_DIM}{_CYAN}      static root / integrity / anti-tamper locator{_RESET}\n")
+    # Render pixelated logo reconstructed from divine-departure-logo.png
+    rendered_art = _LOGO_BANNER_TEMPLATE.format(
+        _PURPLE=_PURPLE,
+        _CYAN=_CYAN,
+        _BLUE=_BLUE,
+        _WHITE=_WHITE,
+        _RESET=_RESET,
+    )
+    _typewriter(rendered_art + "\n", delay=0.012)
+    print(f"{_BOLD}{_CYAN}       DIVINE  DEPARTURE  ::  ADVANCED  APPSEC  ENGINE{_RESET}")
+    print(f"{_DIM}{_PURPLE}    [ Static Root / Integrity / RASP & Anti-Tamper Locator ]{_RESET}\n")
 
 
 def print_outro_banner(total_findings):
@@ -88,7 +116,7 @@ def print_outro_banner(total_findings):
     frames = [_CYAN, _PURPLE, _CYAN, _BOLD + _PURPLE]
     for color in frames:
         sys.stdout.write("\r" + " " * 80 + "\r")
-        sys.stdout.write(f"{color}  ✦ ✦ ✦  DIVINE DEPARTURE  ✦ ✦ ✦{_RESET}")
+        sys.stdout.write(f"{color}  * * *  DIVINE DEPARTURE  * * *{_RESET}")
         sys.stdout.flush()
         time.sleep(0.15)
     print()
