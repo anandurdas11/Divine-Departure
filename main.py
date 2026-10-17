@@ -42,6 +42,24 @@ from native_scanner import scan_native_dir, count_so_files
 from progress import ProgressBar
 from report import build_report
 
+import os
+import shutil
+
+if os.name == "nt":
+    os.system("")  # enables ANSI/VT processing in the console
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+# Banner asset paths
+_BANNER_DIR = Path(__file__).resolve().parent / "banner"
+_FALLBACK_BANNER = (
+    "DIVINE DEPARTURE | Mobile Application Security Analysis Tool\n"
+    "Peel • Analyze • Understand • Test\n"
+)
+_SIXEL_FILE = "dd_440.six"
+
 # ANSI colors
 _PURPLE = "\033[95m"
 _CYAN = "\033[96m"
@@ -50,35 +68,6 @@ _WHITE = "\033[97m"
 _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _RESET = "\033[0m"
-
-_LOGO_BANNER_TEMPLATE = """
-                            {_PURPLE}.:-+++{_WHITE}%@@@@@{_PURPLE}*+-::{_RESET}                      
-                         {_PURPLE} =+++{_WHITE}##%%@%#{_PURPLE}*{_WHITE}#%@%#{_PURPLE}#**=:{_RESET}                   
-          {_PURPLE}...........  +{_WHITE}@@#{_PURPLE}#={_WHITE}#@@@{_PURPLE}+.{_RESET}   {_PURPLE}:*{_WHITE}@@%@@%{_PURPLE}**:{_RESET}                 
-      {_PURPLE}... {_RESET}  {_PURPLE}  .:-:.....:-+*+#{_WHITE}@{_PURPLE}*==:. ..-{_WHITE}%@@%{_PURPLE}*{_WHITE}%@%#{_PURPLE}*+{_RESET}                
-      {_PURPLE} .{_RESET}  {_PURPLE}  . {_RESET}   {_PURPLE} {_RESET}        {_PURPLE} ..:: {_RESET}  {_BLUE} {_PURPLE}. ..:=*{_WHITE}@%#{_PURPLE}+{_WHITE}@@@{_PURPLE}+{_WHITE}#{_BLUE}+{_RESET} {_BLUE} {_RESET}             
-   {_PURPLE}:-{_RESET}  {_PURPLE}+: {_RESET}   {_PURPLE}..{_RESET}        {_PURPLE} ..  {_RESET}   {_PURPLE} .{_RESET}    {_PURPLE}.. {_RESET} {_PURPLE}  :={_WHITE}%%#%@%@{_PURPLE}:{_BLUE}  {_RESET}  {_BLUE} {_RESET}         
-  {_PURPLE}:#{_WHITE}#{_PURPLE}={_WHITE}#%%{_PURPLE}*{_RESET}    {_PURPLE}.:{_RESET}     {_PURPLE}..:.{_RESET}    {_PURPLE}  {_RESET}  {_BLUE} :{_RESET}  {_PURPLE}. {_RESET} {_PURPLE}-{_WHITE}%#{_PURPLE}={_BLUE}-{_CYAN}#****{_WHITE}#%{_CYAN}={_BLUE}...{_RESET}  {_BLUE}.:{_RESET}       
- {_PURPLE}.-*+.={_WHITE}#{_PURPLE}-.{_RESET}   {_PURPLE}. {_RESET}     {_PURPLE} .....{_RESET}   {_PURPLE} {_RESET}   {_WHITE}#{_CYAN}*{_RESET}    {_PURPLE} .={_WHITE}@@@%%@{_BLUE}**{_WHITE}#{_CYAN}*{_BLUE}-{_CYAN}==+={_BLUE}::: . {_RESET}    
-   {_PURPLE}  {_RESET}  {_PURPLE}:.{_RESET}    {_PURPLE}: {_RESET} {_PURPLE} ..::::.{_RESET}  {_PURPLE} .. {_RESET} {_BLUE}.*{_WHITE}@{_CYAN}=+{_BLUE}:{_RESET}    {_PURPLE} -{_WHITE}%@{_PURPLE}=#{_WHITE}@{_PURPLE}+*{_WHITE}@{_PURPLE}*{_RESET}  {_BLUE} .-{_CYAN}+***{_BLUE}:.. {_RESET}  
-   {_PURPLE}-.-*-{_WHITE}%{_PURPLE}+{_RESET}     {_PURPLE}.. ::.{_RESET}   {_PURPLE} {_BLUE}.{_PURPLE}.:{_BLUE} {_RESET} {_BLUE} -+{_WHITE}@#{_CYAN}={_BLUE}-.{_RESET}  {_PURPLE}.{_RESET} {_PURPLE} .+{_WHITE}%@{_PURPLE}*={_WHITE}%#{_RESET}      {_BLUE}  {_CYAN}-#{_WHITE}@{_CYAN}*-{_BLUE}.{_RESET} {_BLUE} {_RESET}
-   {_PURPLE}#+**-{_WHITE}#{_PURPLE}:{_RESET}        {_PURPLE}..{_RESET}   {_PURPLE}..{_RESET}  {_BLUE}.{_WHITE}%{_BLUE}={_RESET}   {_WHITE}%{_CYAN}*{_BLUE} {_RESET}  {_BLUE}:{_WHITE}#{_BLUE}={_RESET}    {_PURPLE}-#+{_WHITE}#{_PURPLE}*.{_RESET}      {_BLUE} {_RESET} {_BLUE}.{_CYAN}-+{_WHITE}@%{_CYAN}:{_BLUE}:.{_RESET}
-  {_PURPLE}:=-{_BLUE}-{_PURPLE}={_BLUE}-+{_PURPLE}-.{_RESET}        {_PURPLE} .....{_RESET}  {_PURPLE}+{_WHITE}@{_CYAN}={_RESET}   {_WHITE}%{_CYAN}*{_RESET}   {_BLUE}-{_WHITE}@#{_BLUE} {_RESET}    {_PURPLE}:+-{_RESET}     {_BLUE}.-{_RESET}  {_BLUE} -:{_CYAN}+{_WHITE}@%{_CYAN}:{_BLUE}:{_RESET} 
- {_PURPLE}... ..:--:.{_RESET}       {_BLUE}.{_RESET} {_PURPLE}.*{_BLUE}+: {_WHITE}%@{_BLUE}:{_RESET}  {_BLUE} +{_WHITE}@{_CYAN}=={_PURPLE}.{_RESET}  {_BLUE}:{_WHITE}%%{_BLUE}.{_RESET}   {_PURPLE} .{_RESET}   {_BLUE} :.{_RESET} {_BLUE} {_RESET} {_BLUE}:{_CYAN}=={_WHITE}#@#{_BLUE}:. {_RESET} 
- {_PURPLE} ..{_BLUE}.::..{_PURPLE}  .{_RESET}    {_BLUE} - -{_PURPLE}*{_CYAN}#={_BLUE}.-{_WHITE}@@{_BLUE}..{_RESET}  {_PURPLE}.={_WHITE}%#{_CYAN}={_PURPLE}:{_RESET}  {_BLUE} .{_WHITE}%@{_CYAN}={_BLUE}..-==:{_RESET} {_BLUE} {_RESET} {_BLUE}::{_CYAN}-*{_WHITE}%%%{_CYAN}#-{_BLUE}. {_RESET}   
-            {_PURPLE} {_BLUE}.{_RESET} {_BLUE} :-{_PURPLE}*{_WHITE}@{_CYAN}+{_BLUE}.{_RESET} {_CYAN}=##{_WHITE}%{_BLUE}*{_CYAN}={_BLUE}:{_RESET}  {_BLUE}:{_CYAN}*{_WHITE}#{_BLUE}:{_RESET}  {_BLUE}.{_CYAN}=*{_WHITE}#{_BLUE}*{_CYAN}*={_BLUE}..{_CYAN}+==++*#{_WHITE}#%{_CYAN}*+{_BLUE}-:.{_RESET} {_BLUE}:.{_RESET}   
-         {_BLUE} {_RESET}  {_CYAN}={_BLUE}+{_PURPLE}-{_BLUE}+{_PURPLE}*{_WHITE}%%{_CYAN}={_BLUE}-{_PURPLE}={_BLUE}: {_RESET}  {_BLUE}:{_WHITE}%@%%{_BLUE}*{_CYAN}+*++*{_WHITE}#%@%{_BLUE}.{_RESET} {_BLUE} :{_CYAN}=+*{_WHITE}#{_CYAN}*#*{_WHITE}#{_CYAN}#{_BLUE}-: {_RESET} {_BLUE}:{_RESET}  {_BLUE} {_RESET}     
-       {_BLUE}  :-{_PURPLE}+{_BLUE}-{_PURPLE}-{_BLUE}=-{_PURPLE}*{_WHITE}#{_BLUE}={_PURPLE}:={_WHITE}%{_CYAN}+{_BLUE}-:.{_RESET} {_CYAN}+{_BLUE}:.-{_CYAN}*{_WHITE}#{_CYAN}+*{_WHITE}#{_CYAN}+{_BLUE}:.:{_CYAN}+{_RESET} {_BLUE}.-{_CYAN}++-{_BLUE}:..==::.{_RESET}  {_BLUE} : {_RESET}       
-       {_BLUE}.:{_PURPLE}++{_BLUE}*: .{_PURPLE}.={_BLUE} :{_CYAN}*={_BLUE}:{_CYAN}=*-{_BLUE}. ::{_RESET}  {_CYAN}+={_WHITE}%{_CYAN}*=+{_BLUE}.{_RESET}  {_BLUE}:{_CYAN}==={_BLUE}={_CYAN}*={_BLUE}=::{_PURPLE} {_BLUE}:{_PURPLE}.{_BLUE}:{_CYAN}+{_PURPLE}={_BLUE}-.{_RESET} {_BLUE}:. {_RESET}     
-       {_BLUE}.-.{_RESET} {_PURPLE}.{_RESET} {_BLUE}..:::{_CYAN}={_BLUE}:{_RESET} {_BLUE}.:.{_RESET}  {_CYAN}-*={_BLUE}:. :{_WHITE}@{_CYAN}+-{_BLUE}  -{_CYAN}+{_BLUE}-:{_CYAN}-{_BLUE}.{_RESET} {_BLUE} .{_CYAN}+{_PURPLE}*{_WHITE}%#%{_PURPLE}*=-{_BLUE}-={_PURPLE}*.{_BLUE} {_RESET} {_BLUE}.{_RESET}     
-           {_BLUE}.:::.{_RESET} {_BLUE} {_RESET}  {_BLUE} :.{_RESET}  {_BLUE}::{_RESET} {_BLUE} .::{_RESET} {_BLUE}+{_CYAN}+{_RESET} {_BLUE} ...{_RESET} {_BLUE}:{_RESET}    {_PURPLE}.{_BLUE}:{_PURPLE}.:.:.{_RESET}    {_BLUE}.{_RESET}         
- {_BLUE} .{_CYAN}-#+={_PURPLE}+-{_RESET} {_BLUE}-:-{_RESET}  {_PURPLE}-{_BLUE}.{_CYAN}*{_BLUE}.{_PURPLE}:{_RESET}  {_PURPLE}:.{_BLUE}-:{_PURPLE}:{_RESET} {_PURPLE}.*+{_BLUE}*+{_PURPLE}.{_BLUE}:{_PURPLE}-{_BLUE}:{_PURPLE}.::{_BLUE}:{_RESET} {_PURPLE}.-{_RESET} {_PURPLE}:{_BLUE}={_PURPLE}-..:-::..{_BLUE}::{_PURPLE}:{_BLUE}::{_CYAN}==={_BLUE}.{_RESET}  
-    {_WHITE}@{_PURPLE}={_RESET} {_PURPLE}={_WHITE}@{_PURPLE}={_WHITE}@{_PURPLE}-*+{_BLUE}+{_PURPLE}*{_BLUE}.{_WHITE}%{_BLUE}:{_WHITE}@#{_PURPLE}={_WHITE}@{_PURPLE}:{_WHITE}@{_PURPLE}+{_BLUE}:{_RESET} {_BLUE} {_WHITE}@{_PURPLE}-{_RESET} {_WHITE}#@{_PURPLE}+{_WHITE}@{_PURPLE}=.{_WHITE}@{_PURPLE}*{_WHITE}%{_PURPLE}={_WHITE}#%{_PURPLE}-:{_WHITE}@{_PURPLE}*{_WHITE}%{_PURPLE}.*{_WHITE}@{_PURPLE}.{_WHITE}%{_PURPLE}=+#{_WHITE}%#%{_PURPLE}={_WHITE}@{_PURPLE}={_BLUE}:{_RESET}   
-   {_BLUE}-{_WHITE}@{_CYAN}*{_BLUE}=*+.#{_PURPLE}-{_RESET} {_PURPLE}#{_BLUE}*{_RESET} {_BLUE} {_CYAN}*{_BLUE}.{_PURPLE}#{_BLUE}-{_PURPLE}+{_WHITE}#{_PURPLE}:{_WHITE}#{_PURPLE}=:{_RESET} {_BLUE}.{_WHITE}@{_BLUE}+={_WHITE}#{_BLUE}={_PURPLE}-#={_BLUE}:{_WHITE}#{_PURPLE}-.{_BLUE}#{_PURPLE}=-*-#=* -*{_RESET} {_PURPLE}={_WHITE}#{_PURPLE}#-*=+{_BLUE}-{_WHITE}@{_CYAN}*={_BLUE}.{_RESET}  
- {_BLUE}.::... {_RESET}       {_BLUE} {_RESET} {_BLUE}.{_RESET}        {_PURPLE} {_RESET} {_PURPLE} .{_BLUE}:: {_RESET}   {_PURPLE} {_RESET}   {_PURPLE}  {_RESET}          {_BLUE} {_RESET} {_PURPLE}. {_RESET}    {_BLUE}. :::. {_RESET}
-       {_PURPLE}.:::.{_RESET}   {_CYAN}={_BLUE}.{_RESET}  {_PURPLE}::::....:.{_RESET}  {_BLUE}::{_RESET}  {_PURPLE}..::::.....:::{_RESET}  {_BLUE} {_CYAN}={_BLUE}.{_RESET}  {_PURPLE}.::. {_RESET}      
-    {_BLUE}...   {_RESET}  {_PURPLE}:.:{_BLUE}:{_PURPLE}.{_BLUE}.{_RESET} {_PURPLE}.........::{_RESET} {_BLUE}..{_PURPLE}..:... {_RESET} {_PURPLE}::......{_RESET} {_PURPLE}..{_BLUE}.{_PURPLE}.{_RESET}  {_BLUE}      . {_RESET}   
-"""
 
 _OUTRO_ART = r"""
         .  .  .
@@ -92,26 +81,61 @@ _OUTRO_ART = r"""
 """
 
 
-def _typewriter(text, delay=0.015):
-    for line in text.splitlines(keepends=True):
-        sys.stdout.write(line)
-        sys.stdout.flush()
-        if delay > 0:
-            time.sleep(delay)
+def _use_sixel():
+    if "--ansi" in sys.argv:
+        return False
+    if "--sixel" in sys.argv or os.environ.get("DD_SIXEL") == "1":
+        return True
+    return bool(os.environ.get("WT_SESSION"))  # Windows Terminal (assumes v1.22+)
+
+
+def _show_ansi_banner():
+    cols = shutil.get_terminal_size().columns
+    if cols >= 72:
+        name, w = "hq_72.ansi", 72
+    elif cols >= 56:
+        name, w = "hq_56.ansi", 56
+    else:
+        print(_FALLBACK_BANNER)
+        return
+
+    banner_path = _BANNER_DIR / name
+    if banner_path.exists():
+        with open(banner_path, encoding="utf-8") as f:
+            sys.stdout.write(f.read())
+    else:
+        print(_FALLBACK_BANNER)
+        return
+
+    B = "\x1b[1;38;2;30;144;255m"
+    W = "\x1b[1;97m"
+    R = "\x1b[0m"
+    print(f"{W}{'DIVINE DEPARTURE'.center(w)}{R}")
+    print(f"{B}{'PEEL • ANALYZE • UNDERSTAND • TEST'.center(w)}{R}")
+    print(f"{'Mobile Application Security Analysis Tool'.center(w)}\n")
 
 
 def print_intro_banner():
-    # Render pixelated logo reconstructed from divine-departure-logo.png
-    rendered_art = _LOGO_BANNER_TEMPLATE.format(
-        _PURPLE=_PURPLE,
-        _CYAN=_CYAN,
-        _BLUE=_BLUE,
-        _WHITE=_WHITE,
-        _RESET=_RESET,
-    )
-    _typewriter(rendered_art + "\n", delay=0.012)
-    print(f"{_BOLD}{_CYAN}       DIVINE  DEPARTURE  ::  ADVANCED  APPSEC  ENGINE{_RESET}")
-    print(f"{_DIM}{_PURPLE}    [ Static Root / Integrity / RASP & Anti-Tamper Locator ]{_RESET}\n")
+    """Display intro banner using Sixel when available, responsive ANSI otherwise."""
+    try:
+        if not sys.stdout.isatty() or os.environ.get("NO_COLOR") or "--no-banner" in sys.argv:
+            return
+
+        if _use_sixel():
+            sixel_path = _BANNER_DIR / _SIXEL_FILE
+            if sixel_path.exists():
+                try:
+                    with open(sixel_path, encoding="ascii", newline="") as f:
+                        sys.stdout.write(f.read())
+                    sys.stdout.flush()
+                    print()
+                    return
+                except Exception:
+                    pass  # fall through to ANSI
+
+        _show_ansi_banner()
+    except Exception:
+        print(_FALLBACK_BANNER)
 
 
 def print_outro_banner(total_findings):
@@ -136,6 +160,8 @@ def parse_args():
     p.add_argument("--skip-java", action="store_true", help="Skip Java/Smali source scanning")
     p.add_argument("--skip-native", action="store_true", help="Skip native .so scanning")
     p.add_argument("--no-banner", action="store_true", help="Disable animated intro/outro banners")
+    p.add_argument("--sixel", action="store_true", help="Force Sixel graphics banner")
+    p.add_argument("--ansi", action="store_true", help="Force ANSI text banner (disable Sixel)")
     p.add_argument("--no-progress", action="store_true", help="Disable scan progress bars")
     p.add_argument("--frida-brief", action="store_true",
                    help="Emit security_model.json + frida_prompt.md + security_mind_map.json for AI Frida-script generation")
