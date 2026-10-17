@@ -32,6 +32,7 @@ CATEGORIES = [
     "RASP_DETECTION",
     "ENFORCEMENT",        # consequence/chokepoint primitives (termination, reaction, gate)
     "JAILBREAK_DETECT",   # iOS alias; treated identically to ROOT_DETECTION
+    "HARDCODED_SECRETS",  # API keys, tokens, embedded secrets, private keys
 ]
 
 
@@ -179,17 +180,27 @@ SOURCE_PATTERNS = [
          regex=_c(r"com\.scottyab\.safetynet|DroidGuard"),
          description="SafetyNet bypass tool reference or DroidGuard string (SafetyNet internals detector).",
          confidence="high"),
+    dict(name="shamiko_safetynetfix", category="ROOT_DETECTION",
+         regex=_c(r"shamiko|safetynet-fix|playintegrityfix|chiteroman|zygisk-assistant"),
+         description="Shamiko / PlayIntegrityFix / SafetyNet-Fix root-cloaking module indicators.",
+         confidence="high"),
 
     # ====================================================================
     # INTEGRITY / ATTESTATION — Android
     # ====================================================================
     dict(name="safetynet_api", category="INTEGRITY_CHECK",
-         regex=_c(r"com\.google\.android\.gms\.safetynet|SafetyNetApi|SafetyNetClient"),
+         regex=_c(r"com\.google\.android\.gms\.safetynet|SafetyNetApi|SafetyNetClient|attest\("),
          description="Google SafetyNet Attestation API usage (device/app integrity check).",
          confidence="high"),
     dict(name="play_integrity_api", category="INTEGRITY_CHECK",
-         regex=_c(r"com\.google\.android\.play\.core\.integrity|IntegrityManager|requestIntegrityToken"),
-         description="Google Play Integrity API usage (successor to SafetyNet).",
+         regex=_c(r"com\.google\.android\.play\.core\.integrity|IntegrityManager|requestIntegrityToken|"
+                  r"StandardIntegrityManager|IntegrityTokenRequest|IntegrityTokenResponse|"
+                  r"StandardIntegrityTokenRequest|StandardIntegrityToken"),
+         description="Google Play Integrity API usage (Standard / Classic Integrity Manager).",
+         confidence="high"),
+    dict(name="apple_app_attest", category="INTEGRITY_CHECK",
+         regex=_c(r"DCAppAttestService|DCDevice|generateKey|attestKey|generateAssertion|DeviceCheck|AppAttest"),
+         description="Apple DeviceCheck / App Attest hardware integrity attestation service.",
          confidence="high"),
     dict(name="signature_verification", category="INTEGRITY_CHECK",
          regex=_c(r"getPackageInfo\([^)]*GET_SIGNATURES|checkSignatures\(|PackageInfo\.signatures|"
@@ -540,6 +551,10 @@ SOURCE_PATTERNS = [
          regex=_c(r"com\.airwatch\.oemconfig|com\.mobileiron\.oemconfig"),
          description="OEMConfig managed configuration interface for MDM vendors.",
          confidence="high"),
+    dict(name="microsoft_intune_mam", category="MDM_CHECK",
+         regex=_c(r"Microsoft\.Intune|IntuneMAM|MAMEnrollmentManager|IntuneMAMSettings"),
+         description="Microsoft Intune MAM (Mobile Application Management) app protection SDK.",
+         confidence="high"),
     dict(name="cross_profile_intents", category="MDM_CHECK",
          regex=_c(r"cross.?profile.*intent|startActivityForUserWithFeature|"
                    r"CrossProfileApps"),
@@ -626,14 +641,14 @@ SOURCE_PATTERNS = [
     # ====================================================================
     dict(name="rasp_vendor_sdk", category="RASP_DETECTION",
          regex=_c(r"com\.appdome|appdome|com\.promon|promonshield|"
-                  r"dexguard|ixguard|guardsquare|"
+                  r"dexguard|ixguard|guardsquare|com\.guardsquare|com\.dexguard|"
                   r"com\.arxan|digital\.ai|"
-                  r"protectt\.ai|appprotectt|"
-                  r"zimperium|zshield|"
+                  r"protectt\.ai|appprotectt|ai\.protectt|"
+                  r"zimperium|zshield|zdefend|"
                   r"approov|criticalblue|"
                   r"iverify|appsealing|"
                   r"com\.lockincomp\.liapp|liapp|"
-                  r"dexprotector|licel|"
+                  r"dexprotector|licel|com\.licel|"
                   r"byterialab|byteria|alphyn|"
                   r"pradeo|nowsecure|"
                   r"com\.secneo|com\.vasco|com\.onespan|com\.preemptive"),
@@ -650,7 +665,7 @@ SOURCE_PATTERNS = [
 
     # --- Extended RASP vendors ---
     dict(name="talsec_freerasp", category="RASP_DETECTION",
-         regex=_c(r"com\.aheaditec\.talsec|freeRasp|TalsecConfig"),
+         regex=_c(r"com\.aheaditec\.talsec|freeRasp|TalsecConfig|com\.a\.talsec|com\.talsec|RASPConfig|ThreatListener"),
          description="Talsec / freeRASP open-source RASP SDK integration.",
          confidence="high"),
     dict(name="promon_shield", category="RASP_DETECTION",
@@ -685,6 +700,30 @@ SOURCE_PATTERNS = [
          regex=_c(r"InstrumentationRegistry|getInstrumentation\(\)|android\.app\.Instrumentation"),
          description="Runtime heap/instrumentation inspection to detect testing/RASP agents.",
          confidence="low"),
+
+    # ====================================================================
+    # HARDCODED SECRETS & CREDENTIALS
+    # ====================================================================
+    dict(name="sec_aws_key", category="HARDCODED_SECRETS",
+         regex=_c(r"\bAKIA[0-9A-Z]{16}\b"),
+         description="AWS Access Key ID embedded in code or resources.",
+         confidence="high"),
+    dict(name="sec_google_api_key", category="HARDCODED_SECRETS",
+         regex=_c(r"\bAIza[0-9A-Za-z\-_]{35}\b"),
+         description="Google / Firebase API Key embedded in code or resources.",
+         confidence="high"),
+    dict(name="sec_jwt_token", category="HARDCODED_SECRETS",
+         regex=_c(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+         description="Hardcoded JSON Web Token (JWT) string.",
+         confidence="medium"),
+    dict(name="sec_private_key", category="HARDCODED_SECRETS",
+         regex=_c(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
+         description="Embedded private key material (PEM block).",
+         confidence="high"),
+    dict(name="sec_json_properties_secret", category="HARDCODED_SECRETS",
+         regex=_c(r"\"(?:masterkey|master_key|apiKey|api_key|client_secret|clientSecret|secretKey)\"\s*:\s*\"[^\"]{6,}\""),
+         description="Hardcoded master key, API key, or client secret in JSON/config structure.",
+         confidence="high"),
 
     # ====================================================================
     # ENFORCEMENT — consequence / chokepoint primitives
@@ -1253,6 +1292,16 @@ PATTERN_TRIGGERS = {
                               "forname(", "loadclass("],
     "enf_gate_signature_hint": ["signingcert", "signaturehash", "apkhash",
                                 "getcertificatehash", "allowlist", "whitelist"],
+
+    # --- HARDCODED SECRETS & CREDENTIALS ---
+    "sec_aws_key": ["akia"],
+    "sec_google_api_key": ["aiza"],
+    "sec_jwt_token": ["eyj"],
+    "sec_private_key": ["begin private key", "begin rsa private key", "begin ec private key"],
+    "sec_json_properties_secret": ["masterkey", "master_key", "apikey", "api_key", "client_secret", "clientsecret", "secretkey"],
+    "shamiko_safetynetfix": ["shamiko", "safetynet-fix", "playintegrityfix", "chiteroman"],
+    "microsoft_intune_mam": ["microsoft.intune", "intunemam", "mamenrollmentmanager"],
+    "apple_app_attest": ["dcappattestservice", "dcdevice", "attestkey", "appattest"],
 }
 
 
@@ -1323,7 +1372,8 @@ NATIVE_INTERESTING_IMPORTS = {
 # Native string patterns (applied to strings extracted from .so rodata)
 NATIVE_STRING_PATTERNS = [p for p in SOURCE_PATTERNS if p["category"] in
                           ("ROOT_DETECTION", "ANTI_HOOK", "ANTI_DEBUG", "EMULATOR_DETECT",
-                           "SSL_PINNING", "RASP_DETECTION", "ENFORCEMENT", "JAILBREAK_DETECT")]
+                           "SSL_PINNING", "RASP_DETECTION", "ENFORCEMENT", "JAILBREAK_DETECT",
+                           "HARDCODED_SECRETS")]
 
 # -----------------------------------------------------------------------
 # Dart / Flutter patterns -- applied to Blutter output (asm/*.txt, objs.txt,

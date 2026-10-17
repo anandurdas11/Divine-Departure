@@ -68,6 +68,11 @@ GENERIC_FRIDA_HINTS = {
         "Hook native JNI functions early (e.g., JNI_OnLoad, RegisterNatives) to intercept the RASP setup phase.",
         "Look for custom ClassLoaders and dynamically loaded DEX files typically used by app shielders."
     ],
+    "HARDCODED_SECRETS": [
+        "Audit hardcoded secrets: verify if credentials are active / valid on staging or production endpoints.",
+        "Hook API request dispatchers to inspect whether hardcoded keys are passed in Authorization headers or query params.",
+        "Rotate compromised keys and migrate secrets to Android Keystore / backend token exchange.",
+    ],
     "ENFORCEMENT": [
         "Hook consequences, not checks: neutralising the single point where a verdict becomes an action disables every upstream detector at once (§0).",
         "Prefer a launch gate / boolean gate: force it to its genuine value (return false for 'is tampered?') rather than blocking the exit, which can leave a half-initialised process stuck at splash (§4).",
@@ -80,6 +85,45 @@ GENERIC_FRIDA_HINTS = {
 # Directory prefixes that jadx / apktool prepend and that are not part of the class name.
 _STRIP_PREFIXES = ("sources/", "sources\\", "smali/", "smali\\")
 _SMALI_MULTIDEX_RE = re.compile(r"^smali_classes\d+[/\\]", re.IGNORECASE)
+
+# In-memory caches to accelerate repeated file queries across hundreds of findings
+_FILE_LINES_CACHE = {}          # str(Path) -> list[str]
+_FILE_TEXT_CACHE = {}           # str(Path) -> str
+_ENCLOSING_METHOD_CACHE = {}    # (str(Path), line_number) -> str
+_RESOLVE_PATH_CACHE = {}        # rel_path -> Path | None
+_SMALI_FILE_CACHE = {}          # (candidate_rel, tuple(smali_dirs)) -> (sfile, multidex, verified)
+_SMALI_DESC_CACHE = {}
+
+
+def clear_cache():
+    """Clear in-memory caches between runs."""
+    _FILE_LINES_CACHE.clear()
+    _FILE_TEXT_CACHE.clear()
+    _ENCLOSING_METHOD_CACHE.clear()
+    _RESOLVE_PATH_CACHE.clear()
+    _SMALI_FILE_CACHE.clear()
+    _SMALI_DESC_CACHE.clear()
+
+
+def _get_file_lines(abs_path: Path) -> list:
+    key = str(abs_path)
+    if key not in _FILE_LINES_CACHE:
+        try:
+            _FILE_LINES_CACHE[key] = abs_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            _FILE_LINES_CACHE[key] = []
+    return _FILE_LINES_CACHE[key]
+
+
+def _get_file_text(abs_path: Path) -> str:
+    key = str(abs_path)
+    if key not in _FILE_TEXT_CACHE:
+        try:
+            _FILE_TEXT_CACHE[key] = abs_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            _FILE_TEXT_CACHE[key] = ""
+    return _FILE_TEXT_CACHE[key]
+
 
 # Hook candidates in these packages are almost always library noise, not the app's
 # own anti-tamper code -- keep them, but rank them below first-party classes and
@@ -119,25 +163,42 @@ _JAVA_METHOD_RE = re.compile(
 
 def _enclosing_method(abs_path: Path, line_number: int) -> str:
     """Best-effort: scan backwards from `line_number` for the enclosing method name."""
-    try:
-        lines = abs_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    except OSError:
+    if not abs_path:
         return ""
+    cache_key = (str(abs_path), line_number)
+    if cache_key in _ENCLOSING_METHOD_CACHE:
+        return _ENCLOSING_METHOD_CACHE[cache_key]
+
+    lines = _get_file_lines(abs_path)
+    if not lines:
+        _ENCLOSING_METHOD_CACHE[cache_key] = ""
+        return ""
+
     idx = min(max(line_number - 1, 0), len(lines) - 1)
     is_smali = abs_path.suffix == ".smali"
-    for k in range(idx, -1, -1):
+    found = ""
+    start_idx = max(0, idx - 150)
+    for k in range(idx, start_idx - 1, -1):
         row = lines[k]
+        if "(" not in row:
+            if is_smali and row.lstrip().startswith(".end method"):
+                break
+            continue
         if is_smali:
-            m = _SMALI_METHOD_RE.match(row)
-            if m:
-                return m.group(1)
-            if row.lstrip().startswith(".end method"):
-                return ""   # we walked out of a method without seeing its header
+            if ".method" in row:
+                m = _SMALI_METHOD_RE.match(row)
+                if m:
+                    found = m.group(1)
+                    break
+            elif row.lstrip().startswith(".end method"):
+                break   # we walked out of a method without seeing its header
         else:
             m = _JAVA_METHOD_RE.match(row)
             if m and m.group(1) not in ("if", "for", "while", "switch", "catch", "new"):
-                return m.group(1)
-    return ""
+                found = m.group(1)
+                break
+    _ENCLOSING_METHOD_CACHE[cache_key] = found
+    return found
 
 
 # =======================================================================
@@ -182,6 +243,8 @@ def _classify_enforcement(pattern_name, category):
         return "reaction_dispatch", 2
     if pattern_name in _DYNAMIC_PATTERNS:
         return "dynamic_loader", 2
+    if category == "HARDCODED_SECRETS":
+        return "credential_secret", 5
     return "detector", 4
 
 
@@ -209,9 +272,6 @@ def _smali_dirs(apktool_dir):
     return dirs
 
 
-_SMALI_DESC_CACHE = {}
-
-
 def _resolve_runtime(jadx_fqcn, method, abs_path, smali_dirs):
     """
     Resolve the runtime class name + smali descriptor for a jadx candidate (§5).
@@ -227,40 +287,47 @@ def _resolve_runtime(jadx_fqcn, method, abs_path, smali_dirs):
     verified = False
 
     # 1. Authoritative: find the class in decoded smali (unsanitised by design).
-    for sdir, idx in smali_dirs:
-        sfile = sdir / (rel + ".smali")
-        if sfile.is_file():
-            verified = True
-            multidex = idx >= 2
-            if method:
-                key = (str(sfile), method)
-                descriptor = _SMALI_DESC_CACHE.get(key)
-                if descriptor is None:
-                    descriptor = ""
-                    try:
-                        mre = re.compile(
-                            r"^\.method\b[^\n]*\b" + re.escape(method) + r"\(([^)]*)\)(\S+)",
-                            re.MULTILINE)
-                        m = mre.search(sfile.read_text(encoding="utf-8", errors="ignore"))
-                        if m:
-                            descriptor = f"L{rel};->{method}({m.group(1)}){m.group(2)}"
-                    except OSError:
-                        pass
-                    _SMALI_DESC_CACHE[key] = descriptor
-            break
+    sdir_key = tuple(str(d) for d, _ in smali_dirs)
+    cache_key = (rel, sdir_key)
+    if cache_key in _SMALI_FILE_CACHE:
+        sfile, multidex, verified = _SMALI_FILE_CACHE[cache_key]
+    else:
+        sfile = None
+        for sdir, idx in smali_dirs:
+            cand_sfile = sdir / (rel + ".smali")
+            if cand_sfile.is_file():
+                sfile = cand_sfile
+                multidex = idx >= 2
+                verified = True
+                break
+        _SMALI_FILE_CACHE[cache_key] = (sfile, multidex, verified)
+
+    if verified and sfile:
+        if method:
+            desc_key = (str(sfile), method)
+            descriptor = _SMALI_DESC_CACHE.get(desc_key)
+            if descriptor is None:
+                descriptor = ""
+                stext = _get_file_text(sfile)
+                if stext:
+                    mre = re.compile(
+                        r"^\.method\b[^\n]*\b" + re.escape(method) + r"\(([^)]*)\)(\S+)",
+                        re.MULTILINE)
+                    m = mre.search(stext)
+                    if m:
+                        descriptor = f"L{rel};->{method}({m.group(1)}){m.group(2)}"
+                _SMALI_DESC_CACHE[desc_key] = descriptor
 
     # 2. Not in smali: honour a jadx "renamed from" comment if the source shows one.
     if not verified and abs_path is not None:
-        try:
-            txt = abs_path.read_text(encoding="utf-8", errors="ignore")
+        txt = _get_file_text(abs_path)
+        if txt:
             m = _JADX_RENAMED_RE.search(txt)
             if m:
                 real = m.group(1).strip().rstrip(";").lstrip("L").replace("/", ".")
                 if real:
                     pkg = jadx_fqcn.rsplit(".", 1)[0] if "." in jadx_fqcn else ""
                     runtime_class = f"{pkg}.{real}" if pkg and "." not in real else real
-        except OSError:
-            pass
 
     return dict(runtime_class=runtime_class, smali_descriptor=descriptor,
                 multidex=multidex, name_verified=verified)
@@ -326,15 +393,20 @@ def _scan_launch_gate(apktool_dir, jadx_dir):
 def build_security_model(apk_name, source_findings, native_string_findings,
                          native_callsite_findings, warnings, out_dir,
                          jadx_dir=None, apktool_dir=None, patch_records=None):
+    clear_cache()
     out_dir = Path(out_dir)
     roots = [Path(d) for d in (jadx_dir, apktool_dir) if d]
     smali_dirs = _smali_dirs(apktool_dir)
 
     def _resolve(rel):
+        if rel in _RESOLVE_PATH_CACHE:
+            return _RESOLVE_PATH_CACHE[rel]
         for r in roots:
             cand = r / rel
             if cand.is_file():
+                _RESOLVE_PATH_CACHE[rel] = cand
                 return cand
+        _RESOLVE_PATH_CACHE[rel] = None
         return None
 
     by_cat = defaultdict(list)
@@ -496,7 +568,129 @@ def build_security_model(apk_name, source_findings, native_string_findings,
     prompt_path = out_dir / "frida_prompt.md"
     prompt_path.write_text(_render_prompt(model), encoding="utf-8")
 
+    # Generate dedicated security_mind_map.json
+    mindmap_data = build_security_mindmap_data(model, source_findings, native_string_findings, native_callsite_findings)
+    mindmap_json_path = out_dir / "security_mind_map.json"
+    mindmap_json_path.write_text(json.dumps(mindmap_data, indent=2), encoding="utf-8")
+
+    model["mindmap_data"] = mindmap_data
+    model["mindmap_json_name"] = "security_mind_map.json"
+
     return json_path, prompt_path, model
+
+
+def build_security_mindmap_data(model, source_findings, native_string_findings, native_callsite_findings):
+    """
+    Build a hierarchical, D3-compatible mind map data structure representing the
+    application security posture, defense mechanisms, secrets, and enforcement chokepoints.
+    """
+    apk_name = model.get("target", {}).get("apk", "Target Application")
+    total_findings = (
+        model.get("summary", {}).get("total_source_findings", 0) +
+        model.get("summary", {}).get("total_native_findings", 0)
+    )
+    root = {
+        "name": apk_name,
+        "category": "root",
+        "full_name": apk_name,
+        "details": f"Target: {apk_name} | Total Findings: {total_findings}",
+        "children": []
+    }
+
+    # 1. Enforcement Chokepoints cluster
+    chokepoints = model.get("enforcement_chokepoints", [])
+    if chokepoints:
+        cp_children = []
+        for cp in chokepoints:
+            role = cp.get("role", "chokepoint")
+            rank = cp.get("enforcement_rank", 1)
+            rt_class = cp.get("runtime_class") or cp.get("symbol") or "Unknown"
+            method = cp.get("method_hint") or cp.get("library") or ""
+            frida_code = cp.get("frida_hook") or (
+                f'Java.use("{rt_class}").{method}.implementation = ...' if method else f'Java.use("{rt_class}")'
+            )
+            cp_children.append({
+                "name": f"{rt_class.split('.')[-1]}.{method}" if method else rt_class.split('.')[-1],
+                "full_name": f"[{role.upper()}] {rt_class} ({method or 'all'})",
+                "category": "ENFORCEMENT",
+                "val": frida_code,
+                "details": f"Role: {role} (Rank {rank}) | Source: {cp.get('source', '')} | Conf: {cp.get('confidence', 'medium')}",
+                "snippet": cp.get("evidence", "")
+            })
+        root["children"].append({
+            "name": f"Enforcement Chokepoints ({len(cp_children)})",
+            "category": "ENFORCEMENT",
+            "full_name": "Enforcement Chokepoints (Launch Gates, Kill Switches, Reactions)",
+            "details": "High-value hook points where failed verdicts trigger terminal or defensive actions.",
+            "children": cp_children
+        })
+
+    # 2. Defense Mechanisms & Secrets by Category
+    mechs = model.get("defense_mechanisms", [])
+    for m in mechs:
+        cat = m.get("category", "")
+        label = m.get("label", cat)
+        cands = m.get("hook_candidates", [])
+        if not cands:
+            continue
+        cat_children = []
+        for c in cands:
+            method = c.get("method_hint") or ""
+            cls_name = c.get("runtime_class") or c.get("java_class", "")
+            display_name = f"{cls_name.split('.')[-1]}.{method}" if method else cls_name.split('.')[-1]
+            cat_children.append({
+                "name": display_name or cls_name,
+                "full_name": f"{cls_name}.{method}" if method else cls_name,
+                "category": cat,
+                "val": c.get("frida_use", f'Java.use("{cls_name}")'),
+                "details": f"Signature: {c.get('signature', '')} | Method: {method or 'N/A'} | Descriptor: {c.get('smali_descriptor', 'N/A')} | Conf: {c.get('confidence', '')}",
+                "snippet": c.get("snippet", ""),
+                "file": c.get("source", "")
+            })
+        root["children"].append({
+            "name": f"{label} ({len(cat_children)})",
+            "category": cat,
+            "full_name": label,
+            "details": f"Detected {m.get('finding_count', len(cat_children))} indicators across {len(cat_children)} hook candidates.",
+            "children": cat_children
+        })
+
+    # 3. Native Binaries
+    native_libs = model.get("native_libraries", [])
+    if native_libs:
+        libs_grouped = defaultdict(list)
+        for n in native_libs:
+            libs_grouped[n.get("library", "Unknown.so")].append(n)
+        native_children = []
+        for lib_name, items in libs_grouped.items():
+            sub_children = []
+            for it in items:
+                sym = it.get("symbol") or it.get("signature") or (it.get("matched", "")[:30])
+                kind = it.get("kind", "native")
+                sub_children.append({
+                    "name": f"{kind}: {sym}",
+                    "full_name": f"{lib_name} -> {sym}",
+                    "category": it.get("category", "ENFORCEMENT"),
+                    "val": it.get("frida_hook") or f"Offset/Addr: {it.get('address') or it.get('offset', '')}",
+                    "details": f"Kind: {kind} | Category: {it.get('category')} | Func: {it.get('function', '')} | Conf: {it.get('confidence', '')}",
+                    "snippet": it.get("matched") or it.get("description", "")
+                })
+            native_children.append({
+                "name": f"{lib_name} ({len(sub_children)})",
+                "category": "NATIVE",
+                "full_name": f"Shared Library: {lib_name}",
+                "details": f"Contains {len(sub_children)} native checks / symbols.",
+                "children": sub_children
+            })
+        root["children"].append({
+            "name": f"Native Binaries ({len(native_libs)})",
+            "category": "NATIVE",
+            "full_name": "Native Libraries (.so / Mach-O)",
+            "details": f"Native binary findings across {len(libs_grouped)} shared libraries.",
+            "children": native_children
+        })
+
+    return root
 
 
 def _render_prompt(model) -> str:

@@ -105,9 +105,12 @@ def parse_args():
     p.add_argument("--skip-java", action="store_true", help="Skip Java/Smali source scanning")
     p.add_argument("--skip-native", action="store_true", help="Skip native .so scanning")
     p.add_argument("--no-banner", action="store_true", help="Disable animated intro/outro banners")
-    p.add_argument("--no-progress", action="store_true", help="Disable scan progress bars")
     p.add_argument("--frida-brief", action="store_true",
-                   help="Emit security_model.json + frida_prompt.md for AI Frida-script generation")
+                   help="Emit security_model.json + frida_prompt.md + security_mind_map.json for AI Frida-script generation")
+    p.add_argument("--mindmap", action="store_true", default=True,
+                   help="Generate interactive security mind map in report.html and emit security_mind_map.json (default: True)")
+    p.add_argument("--no-mindmap", action="store_false", dest="mindmap",
+                   help="Disable interactive security mind map generation")
     p.add_argument("--blutter", action="store_true",
                    help="Reverse-engineer a Flutter app's libapp.so via Blutter and scan the "
                         "resulting Dart assembly / object-pool dumps for security checks "
@@ -237,11 +240,11 @@ def _run_ipa_pipeline(args, apk_path, out_dir):
 
     print(f"    -> {len(source_findings)} unique findings after deduplication")
 
-    # ── Frida brief ──────────────────────────────────────────────────────────
+    # ── Security model & Mind map ────────────────────────────────────────────
     security_model = None
     frida_json_name = frida_prompt_name = None
-    if args.frida_brief:
-        print("[*] Building AI security model / Frida brief ...")
+    if args.frida_brief or args.mindmap:
+        print("[*] Building AI security model / interactive mind map (accelerated) ...")
         from security_model import build_security_model
         json_path, prompt_path, security_model = build_security_model(
             apk_name=apk_path.name,
@@ -255,9 +258,11 @@ def _run_ipa_pipeline(args, apk_path, out_dir):
             patch_records=None,
         )
         frida_json_name = json_path.name
-        frida_prompt_name = prompt_path.name
-        print(f"[+] Security model: {json_path}")
-        print(f"[+] Frida prompt:   {prompt_path}")
+        frida_prompt_name = prompt_path.name if args.frida_brief else None
+        print(f"[+] Security model:    {json_path}")
+        print(f"[+] Security mind-map: {out_dir / 'security_mind_map.json'}")
+        if args.frida_brief:
+            print(f"[+] Frida prompt:      {prompt_path}")
 
     # ── Report ───────────────────────────────────────────────────────────────
     report_path = out_dir / "report.html"
@@ -362,10 +367,11 @@ def _run_apk_pipeline(args, apk_path, out_dir):
         else:
             print("[!] Patch stage did not produce an APK (see notes above).")
 
+    # ── Security model & Mind map ────────────────────────────────────────────
     security_model = None
     frida_json_name = frida_prompt_name = None
-    if args.frida_brief:
-        print("[*] Building AI security model / Frida brief ...")
+    if args.frida_brief or args.mindmap:
+        print("[*] Building AI security model / interactive mind map (accelerated) ...")
         from security_model import build_security_model
         json_path, prompt_path, security_model = build_security_model(
             apk_name=apk_path.name,
@@ -379,9 +385,11 @@ def _run_apk_pipeline(args, apk_path, out_dir):
             patch_records=patch_records,
         )
         frida_json_name = json_path.name
-        frida_prompt_name = prompt_path.name
-        print(f"[+] Security model: {json_path}")
-        print(f"[+] Frida prompt:   {prompt_path}")
+        frida_prompt_name = prompt_path.name if args.frida_brief else None
+        print(f"[+] Security model:    {json_path}")
+        print(f"[+] Security mind-map: {out_dir / 'security_mind_map.json'}")
+        if args.frida_brief:
+            print(f"[+] Frida prompt:      {prompt_path}")
 
     patched_apk_name = None
     if final_apk:
