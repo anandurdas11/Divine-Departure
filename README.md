@@ -87,8 +87,7 @@ also carries its **runtime (smali) class name** and `smali_descriptor` (de-sanit
 jadx display names), plus `role`, `enforcement_rank`, `requires_deferred_hook`
 (secondary-DEX / reflection timing), and `return_to_force` for boolean gates. The Frida
 prompt uses this to hook consequences before checks, resolve classes across every
-classloader, and keep a termination tracer on for verification. See
-[`BYPASS_METHODOLOGY.md`](BYPASS_METHODOLOGY.md) for the full rationale.
+classloader, and keep a termination tracer on for verification.
 
 ### Flutter Application
 
