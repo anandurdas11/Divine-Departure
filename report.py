@@ -26,6 +26,7 @@ CATEGORY_LABELS = {
     "SSL_PINNING": "SSL / Certificate Pinning",
     "RASP_DETECTION": "RASP / App Shielding",
     "ENFORCEMENT": "Enforcement Chokepoints",
+    "HARDCODED_SECRETS": "Hardcoded Secrets & API Keys",
 }
 
 IOS_CATEGORY_LABELS = {
@@ -38,12 +39,13 @@ IOS_CATEGORY_LABELS = {
     "SSL_PINNING": "SSL / Certificate Pinning",
     "RASP_DETECTION": "RASP / App Shielding",
     "ENFORCEMENT": "Enforcement Chokepoints",
+    "HARDCODED_SECRETS": "Hardcoded Secrets & API Keys",
 }
 
 ALL_CATEGORIES = [
     "ROOT_DETECTION", "INTEGRITY_CHECK", "ANTI_DEBUG",
     "ANTI_HOOK", "EMULATOR_DETECT", "MDM_CHECK", "SSL_PINNING", "RASP_DETECTION",
-    "ENFORCEMENT",
+    "ENFORCEMENT", "HARDCODED_SECRETS",
 ]
 
 # Accent colour per category -- used for summary cards, section headers, mind-map nodes.
@@ -57,6 +59,7 @@ CATEGORY_COLOR = {
     "SSL_PINNING":     "#ec4899",
     "RASP_DETECTION":  "#f43f5e",
     "ENFORCEMENT":     "#dc2626",
+    "HARDCODED_SECRETS": "#eab308",
 }
 
 CONFIDENCE_COLOR = {
@@ -174,6 +177,239 @@ footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 26
 @keyframes dd-sheen { 0% { background-position: 0% center; } 100% { background-position: 200% center; } }
 @keyframes dd-fadeout { from { opacity: 1; visibility: visible; } to { opacity: 0; visibility: hidden; } }
 @media print { #dd-overlay { display: none; } .btn { display: none; } }
+
+/* ---- Interactive D3 Mind Map Container & HUD ---- */
+.mm-interactive-card {
+  background: #090d16;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  margin-bottom: 24px;
+  position: relative;
+}
+.mm-toolbar {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  padding: 12px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mm-search-box {
+  position: relative;
+  min-width: 260px;
+  flex: 1;
+  max-width: 400px;
+}
+.mm-search-box input {
+  width: 100%;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 7px 12px 7px 32px;
+  color: #f8fafc;
+  font-size: 13px;
+  outline: none;
+  transition: border-color .15s;
+}
+.mm-search-box input:focus {
+  border-color: #7c5cff;
+}
+.mm-search-box .icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  font-size: 13px;
+}
+.mm-match-count {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+.mm-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.mm-pill-btn {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.mm-pill-btn:hover, .mm-pill-btn.active {
+  background: #7c5cff;
+  border-color: #7c5cff;
+  color: #fff;
+}
+.mm-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.mm-btn {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background .12s;
+}
+.mm-btn:hover {
+  background: #334155;
+  color: #fff;
+}
+.mm-viewport {
+  position: relative;
+  background: radial-gradient(circle at 50% 50%, #0d1527 0%, #090d16 100%);
+  height: 650px;
+  width: 100%;
+  overflow: hidden;
+}
+.mm-viewport svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.mm-node text {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  fill: #e2e8f0;
+  cursor: pointer;
+  user-select: none;
+}
+.mm-node circle {
+  cursor: pointer;
+  transition: r .2s, stroke-width .2s;
+}
+.mm-link {
+  fill: none;
+  stroke: #334155;
+  stroke-width: 1.5px;
+  stroke-opacity: 0.65;
+}
+.mm-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 90%;
+  background: #0f172a;
+  border-left: 1px solid #1e293b;
+  box-shadow: -8px 0 25px rgba(0,0,0,0.5);
+  transform: translateX(100%);
+  transition: transform .28s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+.mm-drawer.open {
+  transform: translateX(0);
+}
+.mm-drawer-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #1e293b;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mm-drawer-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+.mm-drawer-close:hover {
+  color: #fff;
+}
+.mm-drawer-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: #cbd5e1;
+  font-size: 12.5px;
+}
+.mm-drawer-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.mm-drawer-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #64748b;
+  font-weight: 700;
+}
+.mm-drawer-code {
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 11.5px;
+  color: #38bdf8;
+  position: relative;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.mm-copy-btn {
+  align-self: flex-start;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.mm-copy-btn:hover {
+  background: #334155;
+}
+.mm-tooltip {
+  position: absolute;
+  display: none;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid #334155;
+  color: #f8fafc;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  z-index: 100;
+  max-width: 280px;
+  line-height: 1.4;
+}
 """
 
 
@@ -267,10 +503,14 @@ def _patch_section(patch_records):
     return f'<h2 id="patchlog"><span class="dot" style="background:#e5484d"></span>APK Patch Log &mdash; neutralised checks</h2>{body}'
 
 
-def _action_bar(security_model, frida_json_name, frida_prompt_name, patched_apk_name):
+def _action_bar(security_model, frida_json_name, frida_prompt_name, patched_apk_name, mindmap_json_name=None):
     btns = []
     if security_model is not None:
         btns.append('<a class="btn primary" href="#mindmap"><span class="i">&#129504;</span>Security Mind-Map</a>')
+    mm_name = mindmap_json_name or (security_model and security_model.get("mindmap_json_name"))
+    if mm_name:
+        btns.append(f'<a class="btn" href="{_esc(mm_name)}" target="_blank">'
+                    f'<span class="i">&#129504;</span>{_esc(mm_name)}</a>')
     if frida_json_name:
         btns.append(f'<a class="btn" href="{_esc(frida_json_name)}" target="_blank">'
                     f'<span class="i">&#128190;</span>security_model.json</a>')
@@ -286,21 +526,23 @@ def _action_bar(security_model, frida_json_name, frida_prompt_name, patched_apk_
 
 
 def _mindmap_section(security_model):
-    """Inline collapsible mind-map: category -> java class -> method hook points."""
+    """Interactive D3 graphical mind map + inline collapsible accordion."""
     if security_model is None:
         return ""
+
+    mindmap_data = security_model.get("mindmap_data")
+    mm_json_name = security_model.get("mindmap_json_name", "security_mind_map.json")
     mechs = security_model.get("defense_mechanisms", [])
-    tgt = security_model.get("target", {})
+
     head = (
         '<h2 id="mindmap"><span class="dot" style="background:var(--accent)"></span>'
-        'Security Mind-Map &mdash; hook points for Frida</h2>'
-        '<div class="mm-note">Class &amp; method names are heuristic (derived from decompiled '
-        'paths and nearby headers) &mdash; verify before hooking. Full data: '
-        '<code>security_model.json</code> &nbsp;|&nbsp; ready-to-use LLM prompt: <code>frida_prompt.md</code>.</div>'
+        'Interactive Security Mind-Map &mdash; Attack Surface &amp; Defense Tree</h2>'
+        f'<div class="mm-note">Click any node to inspect details and copy Frida hooks in the slide-out drawer. '
+        f'Full structured data: <a href="{_esc(mm_json_name)}" target="_blank" style="color:var(--accent); font-weight:600;"><code>{_esc(mm_json_name)}</code></a> '
+        f'&nbsp;|&nbsp; <code>security_model.json</code>.</div>'
     )
-    if not mechs:
-        return head + '<div class="mindmap"><div class="mm-note">No defensive mechanisms mapped.</div></div>'
 
+    # Textual Accordion fallback / toggleable view
     blocks = []
     for m in mechs:
         cat = m.get("category", "")
@@ -352,7 +594,433 @@ def _mindmap_section(security_model):
             f'{classes_html}{hints_html}</details>'
         )
 
-    return head + f'<div class="mindmap">{"".join(blocks)}</div>'
+    accordion_html = f'<div id="mm-accordion-view" class="mindmap" style="display:none;">{"".join(blocks)}</div>'
+
+    if not mindmap_data:
+        empty_note = '<div class="mm-note">No defensive mechanisms mapped.</div>'
+        content = "".join(blocks) if blocks else empty_note
+        return head + f'<div class="mindmap">{content}</div>'
+
+    raw_json_str = json.dumps(mindmap_data).replace("</script>", "<\\/script>").replace("<", "\\u003c")
+
+    interactive_template = """
+  <div id="mm-interactive-card" class="mm-interactive-card">
+    <div class="mm-toolbar">
+      <div class="mm-search-box">
+        <span class="icon">&#128269;</span>
+        <input type="text" id="mm-search-input" placeholder="Search classes, hooks, methods, secrets..." oninput="mmFilterSearch(this.value)">
+        <span id="mm-match-count" class="mm-match-count"></span>
+      </div>
+      <div class="mm-pills">
+        <button class="mm-pill-btn active" onclick="mmFilterCategory('all', this)">All</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('ENFORCEMENT', this)">Enforcement</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('RASP_DETECTION', this)">RASP</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('ROOT_DETECTION', this)">Root/JB</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('ANTI_DEBUG', this)">Anti-Debug</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('ANTI_HOOK', this)">Anti-Hook</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('INTEGRITY_CHECK', this)">Integrity</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('HARDCODED_SECRETS', this)">Secrets</button>
+        <button class="mm-pill-btn" onclick="mmFilterCategory('NATIVE', this)">Native</button>
+      </div>
+      <div class="mm-actions">
+        <button class="mm-btn" onclick="mmZoomIn()" title="Zoom In">+</button>
+        <button class="mm-btn" onclick="mmZoomOut()" title="Zoom Out">&minus;</button>
+        <button class="mm-btn" onclick="mmResetView()" title="Fit View">Fit</button>
+        <button class="mm-btn" onclick="mmExpandAll()" title="Expand All">Expand</button>
+        <button class="mm-btn" onclick="mmCollapseAll()" title="Collapse All">Collapse</button>
+        <button class="mm-btn" onclick="mmToggleView()" title="Toggle View">&#9776; List</button>
+      </div>
+    </div>
+    <div class="mm-viewport" id="mm-viewport">
+      <svg id="mm-svg"><g id="mm-main-group"></g></svg>
+      <div id="mm-tooltip" class="mm-tooltip"></div>
+      <div id="mm-drawer" class="mm-drawer">
+        <div class="mm-drawer-header">
+          <span id="mm-drawer-badge" class="badge" style="background:#7c5cff">INFO</span>
+          <button class="mm-drawer-close" onclick="mmCloseDrawer()">&times;</button>
+        </div>
+        <div class="mm-drawer-body">
+          <div class="mm-drawer-field">
+            <div class="mm-drawer-label">Target Name</div>
+            <strong id="mm-drawer-title" style="color:#f8fafc; font-size:14px; word-break:break-all;"></strong>
+          </div>
+          <div class="mm-drawer-field">
+            <div class="mm-drawer-label">Full Identifier / Class</div>
+            <code id="mm-drawer-fullname" style="background:#020617; color:#cbd5e1; padding:6px 8px; border-radius:6px; font-size:11px;"></code>
+          </div>
+          <div id="mm-val-group" class="mm-drawer-field" style="display:none;">
+            <div class="mm-drawer-label">Value / Frida Hook Implementation</div>
+            <div id="mm-drawer-val" class="mm-drawer-code"></div>
+            <button class="mm-copy-btn" onclick="mmCopyText('mm-drawer-val')">&#128203; Copy Frida Hook</button>
+          </div>
+          <div class="mm-drawer-field">
+            <div class="mm-drawer-label">Detection Details &amp; Confidence</div>
+            <div id="mm-drawer-details" style="line-height:1.45;"></div>
+          </div>
+          <div id="mm-snippet-group" class="mm-drawer-field" style="display:none;">
+            <div class="mm-drawer-label">Code Snippet / Source Evidence</div>
+            <div id="mm-drawer-snippet" class="mm-drawer-code" style="color:#e2e8f0;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  """
+
+    js_code = """
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>
+  (function() {
+    const rawData = __MINDMAP_DATA__;
+    if (!rawData || !window.d3) return;
+
+    const colors = {
+      root: "#7c5cff",
+      ROOT_DETECTION: "#e5484d",
+      INTEGRITY_CHECK: "#a855f7",
+      ANTI_DEBUG: "#3b82f6",
+      ANTI_HOOK: "#14b8a6",
+      EMULATOR_DETECT: "#f59e0b",
+      MDM_CHECK: "#64748b",
+      SSL_PINNING: "#ec4899",
+      RASP_DETECTION: "#f43f5e",
+      ENFORCEMENT: "#dc2626",
+      HARDCODED_SECRETS: "#eab308",
+      NATIVE: "#06b6d4"
+    };
+
+    let root, svg, g, zoom, tree;
+
+    function initMindMap() {
+      const container = document.getElementById("mm-viewport");
+      if (!container) return;
+      const width = container.clientWidth || 1000;
+      const height = container.clientHeight || 650;
+
+      svg = d3.select("#mm-svg");
+      g = d3.select("#mm-main-group");
+
+      zoom = d3.zoom()
+        .scaleExtent([0.15, 3])
+        .on("zoom", (event) => g.attr("transform", event.transform));
+
+      svg.call(zoom);
+      svg.call(zoom.transform, d3.zoomIdentity.translate(80, height / 2).scale(0.8));
+
+      root = d3.hierarchy(rawData);
+      root.x0 = height / 2;
+      root.y0 = 0;
+
+      // Collapse level 2+ by default to avoid clutter
+      if (root.children) {
+        root.children.forEach(group => {
+          if (group.children) {
+            group._children = group.children;
+            group.children = null;
+          }
+        });
+      }
+
+      update(root);
+    }
+
+    function truncate(str, maxLen = 32) {
+      if (!str) return "";
+      return str.length > maxLen ? str.slice(0, maxLen - 3) + "..." : str;
+    }
+
+    function update(source) {
+      const nodes = root.descendants();
+      const links = root.links();
+
+      const nodeHeight = 36;
+      const dynamicHeight = Math.max(650, nodes.length * nodeHeight);
+      tree = d3.tree().size([dynamicHeight - 80, Math.max(1000, (root.height + 1) * 240)]);
+      tree(root);
+
+      nodes.forEach(d => { d.y = d.depth * 230; });
+
+      let i = 0;
+      const node = g.selectAll("g.mm-node")
+        .data(nodes, d => d.id || (d.id = ++i));
+
+      const nodeEnter = node.enter().append("g")
+        .attr("class", "mm-node")
+        .attr("transform", d => `translate(${source.y0 || source.y},${source.x0 || source.x})`)
+        .on("click", (event, d) => {
+          if (d.children) {
+            d._children = d.children;
+            d.children = null;
+          } else if (d._children) {
+            d.children = d._children;
+            d._children = null;
+          }
+          mmOpenDrawer(d.data);
+          update(d);
+        })
+        .on("mouseover", (event, d) => mmShowTooltip(event, d.data))
+        .on("mousemove", mmMoveTooltip)
+        .on("mouseout", mmHideTooltip);
+
+      nodeEnter.append("circle")
+        .attr("r", 1e-6)
+        .attr("fill", d => d._children ? (colors[d.data.category] || '#94a3b8') : (d.children ? '#0f172a' : (colors[d.data.category] || '#94a3b8')))
+        .attr("stroke", d => colors[d.data.category] || '#94a3b8')
+        .attr("stroke-width", d => d._children ? "2.5px" : "1.8px");
+
+      nodeEnter.append("text")
+        .attr("dy", ".35em")
+        .attr("x", d => (d.children || d._children) ? -14 : 14)
+        .attr("text-anchor", d => (d.children || d._children) ? "end" : "start")
+        .text(d => truncate(d.data.name))
+        .style("fill-opacity", 1e-6);
+
+      const nodeUpdate = node.merge(nodeEnter).transition().duration(320)
+        .attr("transform", d => `translate(${d.y},${d.x})`);
+
+      nodeUpdate.select("circle")
+        .attr("r", d => d.depth === 0 ? 9 : (d._children ? 7 : 5))
+        .attr("fill", d => d._children ? (colors[d.data.category] || '#94a3b8') : (d.children ? '#0f172a' : (colors[d.data.category] || '#94a3b8')))
+        .attr("stroke", d => colors[d.data.category] || '#94a3b8')
+        .attr("stroke-width", d => d._children ? "2.5px" : "1.8px");
+
+      nodeUpdate.select("text")
+        .style("fill-opacity", 1)
+        .attr("x", d => (d.children || d._children) ? -14 : 14)
+        .attr("text-anchor", d => (d.children || d._children) ? "end" : "start")
+        .text(d => truncate(d.data.name));
+
+      const nodeExit = node.exit().transition().duration(320)
+        .attr("transform", d => `translate(${source.y},${source.x})`)
+        .remove();
+
+      nodeExit.select("circle").attr("r", 1e-6);
+      nodeExit.select("text").style("fill-opacity", 1e-6);
+
+      const link = g.selectAll("path.mm-link")
+        .data(links, d => d.target.id);
+
+      const linkEnter = link.enter().insert("path", "g")
+        .attr("class", "mm-link")
+        .attr("d", d => {
+          const o = {x: source.x0 || source.x, y: source.y0 || source.y};
+          return mmDiagonal(o, o);
+        });
+
+      link.merge(linkEnter).transition().duration(320)
+        .attr("d", d => mmDiagonal(d.source, d.target));
+
+      link.exit().transition().duration(320)
+        .attr("d", d => {
+          const o = {x: source.x, y: source.y};
+          return mmDiagonal(o, o);
+        })
+        .remove();
+
+      nodes.forEach(d => {
+        d.x0 = d.x;
+        d.y0 = d.y;
+      });
+    }
+
+    function mmDiagonal(s, d) {
+      return `M ${s.y} ${s.x} C ${(s.y + d.y) / 2} ${s.x}, ${(s.y + d.y) / 2} ${d.x}, ${d.y} ${d.x}`;
+    }
+
+    window.mmOpenDrawer = function(data) {
+      const drawer = document.getElementById("mm-drawer");
+      const badge = document.getElementById("mm-drawer-badge");
+      const title = document.getElementById("mm-drawer-title");
+      const fullname = document.getElementById("mm-drawer-fullname");
+      const valGroup = document.getElementById("mm-val-group");
+      const valElem = document.getElementById("mm-drawer-val");
+      const details = document.getElementById("mm-drawer-details");
+      const snippetGroup = document.getElementById("mm-snippet-group");
+      const snippet = document.getElementById("mm-drawer-snippet");
+
+      const catColor = colors[data.category] || '#7c5cff';
+      badge.textContent = (data.category || 'INFO').toUpperCase();
+      badge.style.background = catColor;
+
+      title.textContent = data.name || "Details";
+      fullname.textContent = data.full_name || data.name || "N/A";
+
+      if (data.val) {
+        valGroup.style.display = "flex";
+        valElem.textContent = data.val;
+      } else {
+        valGroup.style.display = "none";
+      }
+
+      details.textContent = data.details || "No further details available.";
+
+      if (data.snippet) {
+        snippetGroup.style.display = "flex";
+        snippet.textContent = data.snippet;
+      } else {
+        snippetGroup.style.display = "none";
+      }
+
+      drawer.classList.add("open");
+    };
+
+    window.mmCloseDrawer = function() {
+      const d = document.getElementById("mm-drawer");
+      if (d) d.classList.remove("open");
+    };
+
+    const tooltip = document.getElementById("mm-tooltip");
+    window.mmShowTooltip = function(event, data) {
+      if (!tooltip) return;
+      tooltip.innerHTML = `<strong>${data.name}</strong><br><span style="color:#94a3b8; font-size:10px;">${(data.category||'').toUpperCase()}</span><br>${data.details || ''}`;
+      tooltip.style.display = "block";
+      mmMoveTooltip(event);
+    };
+    window.mmMoveTooltip = function(event) {
+      if (!tooltip) return;
+      const rect = document.getElementById("mm-viewport").getBoundingClientRect();
+      tooltip.style.left = (event.clientX - rect.left + 15) + "px";
+      tooltip.style.top = (event.clientY - rect.top + 15) + "px";
+    };
+    window.mmHideTooltip = function() {
+      if (tooltip) tooltip.style.display = "none";
+    };
+
+    window.mmCopyText = function(elemId) {
+      const el = document.getElementById(elemId);
+      if (!el) return;
+      navigator.clipboard.writeText(el.textContent).then(() => {
+        const btn = document.querySelector(".mm-copy-btn");
+        if (btn) {
+          const old = btn.textContent;
+          btn.textContent = "✓ Copied!";
+          setTimeout(() => btn.textContent = old, 1800);
+        }
+      });
+    };
+
+    window.mmFilterCategory = function(cat, btn) {
+      document.querySelectorAll(".mm-pill-btn").forEach(b => b.classList.remove("active"));
+      if (btn) btn.classList.add("active");
+
+      if (cat === "all") {
+        if (root.children) {
+          root.children.forEach(g => {
+            if (g._children) { g.children = g._children; g._children = null; }
+          });
+        }
+      } else {
+        if (root.children) {
+          root.children.forEach(g => {
+            if (g.data.category === cat) {
+              if (g._children) { g.children = g._children; g._children = null; }
+            } else {
+              if (g.children) { g._children = g.children; g.children = null; }
+            }
+          });
+        }
+      }
+      update(root);
+      mmResetView();
+    };
+
+    window.mmFilterSearch = function(keyword) {
+      const countLabel = document.getElementById("mm-match-count");
+      if (!keyword || keyword.trim() === "") {
+        countLabel.textContent = "";
+        return;
+      }
+      const q = keyword.toLowerCase().trim();
+      let matches = 0;
+
+      function searchNode(d) {
+        const match = (d.data.name && d.data.name.toLowerCase().includes(q)) ||
+                      (d.data.full_name && d.data.full_name.toLowerCase().includes(q)) ||
+                      (d.data.details && d.data.details.toLowerCase().includes(q)) ||
+                      (d.data.val && d.data.val.toLowerCase().includes(q));
+        if (match) matches++;
+
+        let childMatch = false;
+        const allChildren = (d.children || []).concat(d._children || []);
+        allChildren.forEach(c => {
+          if (searchNode(c)) childMatch = true;
+        });
+
+        if (childMatch) {
+          if (d._children) {
+            d.children = d._children;
+            d._children = null;
+          }
+        }
+        return match || childMatch;
+      }
+
+      searchNode(root);
+      countLabel.textContent = matches > 0 ? `${matches} match${matches > 1 ? 'es' : ''}` : "No matches";
+      update(root);
+    };
+
+    window.mmExpandAll = function() {
+      function expand(d) {
+        if (d._children) { d.children = d._children; d._children = null; }
+        if (d.children) d.children.forEach(expand);
+      }
+      expand(root);
+      update(root);
+    };
+
+    window.mmCollapseAll = function() {
+      function collapse(d) {
+        if (d.children) { d._children = d.children; d.children = null; }
+      }
+      if (root.children) root.children.forEach(collapse);
+      update(root);
+      mmResetView();
+    };
+
+    window.mmResetView = function() {
+      const container = document.getElementById("mm-viewport");
+      const h = container ? container.clientHeight : 650;
+      svg.transition().duration(400).call(
+        zoom.transform,
+        d3.zoomIdentity.translate(80, h / 2).scale(0.8)
+      );
+    };
+
+    window.mmZoomIn = function() {
+      svg.transition().duration(250).call(zoom.scaleBy, 1.3);
+    };
+
+    window.mmZoomOut = function() {
+      svg.transition().duration(250).call(zoom.scaleBy, 0.7);
+    };
+
+    window.mmToggleView = function() {
+      const treeView = document.getElementById("mm-interactive-card");
+      const accView = document.getElementById("mm-accordion-view");
+      if (accView.style.display === "none") {
+        accView.style.display = "block";
+        treeView.style.display = "none";
+      } else {
+        accView.style.display = "none";
+        treeView.style.display = "block";
+      }
+    };
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") mmCloseDrawer();
+    });
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initMindMap);
+    } else {
+      initMindMap();
+    }
+  })();
+  </script>
+  """.replace("__MINDMAP_DATA__", raw_json_str)
+
+    return head + interactive_template + accordion_html + js_code
 
 
 def build_report(apk_name, source_findings, native_string_findings, native_callsite_findings,

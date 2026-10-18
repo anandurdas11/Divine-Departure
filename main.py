@@ -42,21 +42,32 @@ from native_scanner import scan_native_dir, count_so_files
 from progress import ProgressBar
 from report import build_report
 
+import os
+import shutil
+
+if os.name == "nt":
+    os.system("")  # enables ANSI/VT processing in the console
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+# Banner asset paths
+_BANNER_DIR = Path(__file__).resolve().parent / "banner"
+_FALLBACK_BANNER = (
+    "DIVINE DEPARTURE | Mobile Application Security Analysis Tool\n"
+    "Peel • Analyze • Understand • Test\n"
+)
+_SIXEL_FILE = "dd_440.six"
+
 # ANSI colors
 _PURPLE = "\033[95m"
 _CYAN = "\033[96m"
+_BLUE = "\033[94m"
+_WHITE = "\033[97m"
 _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _RESET = "\033[0m"
-
-_INTRO_ART = r"""
-   _____ _____ _    _____ _   _ ______   ____  ______ _____  ___    ____ _______ _    _ _____  ______
-  |  __ \_   _| |  / /_ _| \ | |  ____| |  _ \|  ____|  __ \/ _ \  |  _ \__   __| |  | |  __ \|  ____|
-  | |  | || | | | | | | ||  \| | |__    | | | | |__  | |__) | |_| | |_) | | |  | |  | | |__) | |__
-  | |  | || | | | | | | || . ` |  __|   | | | |  __| |  ___/\__, |  _ <  | |  | |  | |  _  /|  __|
-  | |__| || |_| |__/ |_| || |\  | |____  | |__| | |____| |     / /| |_) | | |  | |__| | | \ \| |____
-  |_____/_____|_____|___||_| \_|______| |_____/|______|_|    /_/ |____/  |_|   \____/|_|  \_\______|
-"""
 
 _OUTRO_ART = r"""
         .  .  .
@@ -70,17 +81,61 @@ _OUTRO_ART = r"""
 """
 
 
-def _typewriter(text, delay=0.0006):
-    for ch in text:
-        sys.stdout.write(ch)
-        sys.stdout.flush()
-        time.sleep(delay)
+def _use_sixel():
+    if "--ansi" in sys.argv:
+        return False
+    if "--sixel" in sys.argv or os.environ.get("DD_SIXEL") == "1":
+        return True
+    return bool(os.environ.get("WT_SESSION"))  # Windows Terminal (assumes v1.22+)
+
+
+def _show_ansi_banner():
+    cols = shutil.get_terminal_size().columns
+    if cols >= 72:
+        name, w = "hq_72.ansi", 72
+    elif cols >= 56:
+        name, w = "hq_56.ansi", 56
+    else:
+        print(_FALLBACK_BANNER)
+        return
+
+    banner_path = _BANNER_DIR / name
+    if banner_path.exists():
+        with open(banner_path, encoding="utf-8") as f:
+            sys.stdout.write(f.read())
+    else:
+        print(_FALLBACK_BANNER)
+        return
+
+    B = "\x1b[1;38;2;30;144;255m"
+    W = "\x1b[1;97m"
+    R = "\x1b[0m"
+    print(f"{W}{'DIVINE DEPARTURE'.center(w)}{R}")
+    print(f"{B}{'PEEL • ANALYZE • UNDERSTAND • TEST'.center(w)}{R}")
+    print(f"{'Mobile Application Security Analysis Tool'.center(w)}\n")
 
 
 def print_intro_banner():
-    print(f"{_PURPLE}{_BOLD}", end="")
-    _typewriter(_INTRO_ART, delay=0.0004)
-    print(f"{_RESET}{_DIM}{_CYAN}      static root / integrity / anti-tamper locator{_RESET}\n")
+    """Display intro banner using Sixel when available, responsive ANSI otherwise."""
+    try:
+        if not sys.stdout.isatty() or os.environ.get("NO_COLOR") or "--no-banner" in sys.argv:
+            return
+
+        if _use_sixel():
+            sixel_path = _BANNER_DIR / _SIXEL_FILE
+            if sixel_path.exists():
+                try:
+                    with open(sixel_path, encoding="ascii", newline="") as f:
+                        sys.stdout.write(f.read())
+                    sys.stdout.flush()
+                    print()
+                    return
+                except Exception:
+                    pass  # fall through to ANSI
+
+        _show_ansi_banner()
+    except Exception:
+        print(_FALLBACK_BANNER)
 
 
 def print_outro_banner(total_findings):
@@ -88,7 +143,7 @@ def print_outro_banner(total_findings):
     frames = [_CYAN, _PURPLE, _CYAN, _BOLD + _PURPLE]
     for color in frames:
         sys.stdout.write("\r" + " " * 80 + "\r")
-        sys.stdout.write(f"{color}  ✦ ✦ ✦  DIVINE DEPARTURE  ✦ ✦ ✦{_RESET}")
+        sys.stdout.write(f"{color}  * * *  DIVINE DEPARTURE  * * *{_RESET}")
         sys.stdout.flush()
         time.sleep(0.15)
     print()
@@ -105,9 +160,15 @@ def parse_args():
     p.add_argument("--skip-java", action="store_true", help="Skip Java/Smali source scanning")
     p.add_argument("--skip-native", action="store_true", help="Skip native .so scanning")
     p.add_argument("--no-banner", action="store_true", help="Disable animated intro/outro banners")
+    p.add_argument("--sixel", action="store_true", help="Force Sixel graphics banner")
+    p.add_argument("--ansi", action="store_true", help="Force ANSI text banner (disable Sixel)")
     p.add_argument("--no-progress", action="store_true", help="Disable scan progress bars")
     p.add_argument("--frida-brief", action="store_true",
-                   help="Emit security_model.json + frida_prompt.md for AI Frida-script generation")
+                   help="Emit security_model.json + frida_prompt.md + security_mind_map.json for AI Frida-script generation")
+    p.add_argument("--mindmap", action="store_true", default=True,
+                   help="Generate interactive security mind map in report.html and emit security_mind_map.json (default: True)")
+    p.add_argument("--no-mindmap", action="store_false", dest="mindmap",
+                   help="Disable interactive security mind map generation")
     p.add_argument("--blutter", action="store_true",
                    help="Reverse-engineer a Flutter app's libapp.so via Blutter and scan the "
                         "resulting Dart assembly / object-pool dumps for security checks "
@@ -237,11 +298,11 @@ def _run_ipa_pipeline(args, apk_path, out_dir):
 
     print(f"    -> {len(source_findings)} unique findings after deduplication")
 
-    # ── Frida brief ──────────────────────────────────────────────────────────
+    # ── Security model & Mind map ────────────────────────────────────────────
     security_model = None
     frida_json_name = frida_prompt_name = None
-    if args.frida_brief:
-        print("[*] Building AI security model / Frida brief ...")
+    if args.frida_brief or args.mindmap:
+        print("[*] Building AI security model / interactive mind map (accelerated) ...")
         from security_model import build_security_model
         json_path, prompt_path, security_model = build_security_model(
             apk_name=apk_path.name,
@@ -255,9 +316,11 @@ def _run_ipa_pipeline(args, apk_path, out_dir):
             patch_records=None,
         )
         frida_json_name = json_path.name
-        frida_prompt_name = prompt_path.name
-        print(f"[+] Security model: {json_path}")
-        print(f"[+] Frida prompt:   {prompt_path}")
+        frida_prompt_name = prompt_path.name if args.frida_brief else None
+        print(f"[+] Security model:    {json_path}")
+        print(f"[+] Security mind-map: {out_dir / 'security_mind_map.json'}")
+        if args.frida_brief:
+            print(f"[+] Frida prompt:      {prompt_path}")
 
     # ── Report ───────────────────────────────────────────────────────────────
     report_path = out_dir / "report.html"
@@ -362,10 +425,11 @@ def _run_apk_pipeline(args, apk_path, out_dir):
         else:
             print("[!] Patch stage did not produce an APK (see notes above).")
 
+    # ── Security model & Mind map ────────────────────────────────────────────
     security_model = None
     frida_json_name = frida_prompt_name = None
-    if args.frida_brief:
-        print("[*] Building AI security model / Frida brief ...")
+    if args.frida_brief or args.mindmap:
+        print("[*] Building AI security model / interactive mind map (accelerated) ...")
         from security_model import build_security_model
         json_path, prompt_path, security_model = build_security_model(
             apk_name=apk_path.name,
@@ -379,9 +443,11 @@ def _run_apk_pipeline(args, apk_path, out_dir):
             patch_records=patch_records,
         )
         frida_json_name = json_path.name
-        frida_prompt_name = prompt_path.name
-        print(f"[+] Security model: {json_path}")
-        print(f"[+] Frida prompt:   {prompt_path}")
+        frida_prompt_name = prompt_path.name if args.frida_brief else None
+        print(f"[+] Security model:    {json_path}")
+        print(f"[+] Security mind-map: {out_dir / 'security_mind_map.json'}")
+        if args.frida_brief:
+            print(f"[+] Frida prompt:      {prompt_path}")
 
     patched_apk_name = None
     if final_apk:
