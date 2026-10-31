@@ -3,19 +3,32 @@ ios_security_model.py
 
 iOS-aware counterpart to security_model.py. Takes the SourceFinding records
 emitted by the IPA pipeline (ios_scanner + ios_deep_analyzer, converted by
-_run_ipa_pipeline in main.py) and distils them into a security model whose hook
-hints are shaped for iOS -- ObjC selectors, Swift mangled names, SecTrust /
-BoringSSL / AFSecurityPolicy / NSURLSession pinning, UIApplication/scene-level
-exit chokepoints -- not for Android.
+_run_ipa_pipeline in main.py) and distils them into a security model whose
+hook hints are shaped for iOS, not for Android:
 
-The Android build_security_model lives in security_model.py; this file does the
-same job for IPA targets. Both share the mind-map renderer in security_model.py
-(it only reads generic fields like runtime_class / method_hint / frida_use that
-we fill in here with iOS-appropriate values).
+  * ObjC selectors and Swift-mangled class names (demangled where possible)
+  * SecTrust / BoringSSL / CFNetwork / AFNetworking / Alamofire / TrustKit
+    pinning stacks
+  * NSURLSession and WKWebView auth-challenge handlers
+  * UIApplication / UIScene lifecycle exit chokepoints
+  * Code-signing (SecCodeCheckValidity, csops) and biometric
+    (LocalAuthentication) gates
+  * MDM/EMM vendor hooks (Intune, AirWatch/Workspace ONE, MobileIron/Ivanti,
+    MaaS360, Jamf/Kandji/Mosyle, BlackBerry Dynamics, Hexnode, SOTI)
+  * Commercial RASP SDKs (Appdome, Promon SHIELD, GuardSquare iXGuard,
+    Verimatrix/WhiteCryption, OneSpan, Zimperium zIAP, Approov,
+    IBM Trusteer, Lookout, Pradeo, V-Key, Shape/F5, Jscrambler, Build38,
+    Talsec freeRASP, AppProtecttXC, Mobeix Mx_*, IOSSecuritySuite,
+    DTTJailbreakDetection, RSADJailbreakDetector, RN jail-monkey, …)
 
-Derived from real-world runtime bypass work on AU 0101 (AppProtecttXC RASP +
-Mobeix in-app gate), see walkthrough.md: the chokepoint list and hint strings
-are the ones that actually unblock the app -- not generic guesses.
+The Android build_security_model lives in security_model.py; this file does
+the same job for IPA targets. Both share the mind-map renderer in
+security_model.py (it only reads generic fields like runtime_class /
+method_hint / frida_use, which we fill in with iOS-appropriate values).
+
+The chokepoint signatures and hints are universal: they fire on any iOS
+target that uses one of the recognised stacks, regardless of the app. The
+model does not assume a specific banking app.
 """
 
 from __future__ import annotations
@@ -43,30 +56,54 @@ _MAX_CANDIDATES_PER_CATEGORY = 25
 # delegate, hand-rolled trust evaluation, dyld image hiding, SDK-level exit.
 IOS_GENERIC_FRIDA_HINTS = {
     "ROOT_DETECTION": [
-        "Hook -[Mx_DeviceHardware isJailbroken] / -[Mx_AppManager isRootedDevice] / "
-        "-[Mx_ApplicationWrapper isRootedDevice] -> NO.",
-        "Hook -[Mx_SecuredData getApplicationShouldBlockRootedDevices / "
-        "getApplicationShouldBlockDebugModeDevices / "
-        "getApplicationShouldBlockNonPhysicalDevices] -> NO.",
-        "Hook -[Mx_AppManager blockRootedDevice:] / blockDebugModeDevices:] -> no-op.",
-        "Hook -[Mx_AppManager createJailBreakErrorView] -> return a fresh empty "
-        "UIView (NOT nil -- addSubview:nil raises).",
-        "Hook -[RNDeviceInfo isEmulator] / isEmulatorSync -> NO (RN surface).",
-        "Hide suspect dyld images (frida, gadget, substrate, substitute, ellekit, "
-        "libinjector, libhooker, /var/jb) by replacing _dyld_image_count and "
-        "_dyld_get_image_name with filtered variants.",
-        "Classic libc path hiding (open/stat/access/fopen for /Applications/Cydia.app, "
-        "/private/var/lib/apt, /bin/bash, /usr/sbin/sshd) often CRASHES at dyld-init "
-        "time on real apps (CFBundle inlines a file open and jumps the trampoline "
-        "before Frida's runtime is settled). Prefer the ObjC-method hooks above and "
-        "only fall back to libc hooks per-detector if one slips through.",
+        "Any @objc 'is this device bad?' predicate (isJailbroken, isJailBroken, "
+        "isDeviceJailBroken, amIJailbroken, isRooted, isCompromised, "
+        "isDeviceCompromised) -> force NO. Enumerate with new ApiResolver('objc') "
+        "patterns like '-[* isJailbroken]'.",
+        "Known detection libraries -- hook their public entry: "
+        "+[IOSSecuritySuite amIJailbroken] / +[JailbreakDetection isJailbroken] / "
+        "-[DTTJailbreakDetection isJailbroken] / -[RSADJailbreakDetector "
+        "isJailbroken] / -[JailbreakChecker amIJailbroken] -> NO.",
+        "React-Native plugins: -[RNJailMonkey isJailBroken] / "
+        "-[RNJailbreakDetection isJailBroken] / -[RNDeviceInfo isEmulator / "
+        "isEmulatorSync] -> NO.",
+        "Hand-rolled 'block' / 'should-block' booleans found in the app's own "
+        "classes (e.g. getApplicationShouldBlockRootedDevices, "
+        "shouldBlockJailbrokenDevices, blockRootedDevice:) -> force NO / no-op the "
+        "setter.",
+        "'createJailBreakErrorView' / 'buildJailbreakView' selectors return a UI "
+        "the app overlays on top of its own window -- replace with a fresh empty "
+        "UIView (NOT nil, addSubview:nil raises).",
+        "canOpenURL: for cydia:// / sileo:// / zbra:// / undecimus:// / filza:// "
+        "/ activator:// -- hook -[UIApplication canOpenURL:] and return NO for "
+        "those schemes.",
+        "fork() / vfork() / posix_spawn() returning a valid pid proves sandbox "
+        "escape -- hook them to return -1 (errno=EACCES).",
+        "Hide suspect dyld images (frida, gadget, substrate, substitute, "
+        "ellekit, libinjector, libhooker, roothide, choicy, /var/jb, "
+        "libtweakinject, /Library/MobileSubstrate) by replacing "
+        "_dyld_image_count / _dyld_get_image_name with filtered variants.",
+        "Classic libc path hiding (open/stat/access/fopen for /Applications/"
+        "Cydia.app, /private/var/lib/apt, /bin/bash, /usr/sbin/sshd, /var/jb) "
+        "can CRASH at dyld-init time on real apps (CFBundle inlines a file open "
+        "and jumps the libc trampoline before Frida's runtime is settled). "
+        "Prefer the ObjC-method hooks above; only fall back to libc hooks "
+        "per-detector if one slips through.",
     ],
     "ANTI_HOOK": [
-        "The real AppProtecttXC detectors (DylibInjectionDetector, MethodSwizzleDetector, "
-        "RuntimeSwizzleInspector, FishHookDetector, ToolingProbe) are pure-Swift with "
-        "ZERO @objc methods -- ObjC Interceptor cannot reach them. Pin the verdict "
-        "instead (see ENFORCEMENT hints).",
-        "Replace _dyld_image_count / _dyld_get_image_name to hide injected tweaks.",
+        "Commercial RASP SDKs (Appdome, Promon SHIELD, GuardSquare iXGuard, "
+        "Zimperium zIAP, Verimatrix, OneSpan, V-Key, IBM Trusteer, Lookout, "
+        "Pradeo, Shape/F5, AppProtecttXC) typically carry their detectors in "
+        "**pure Swift with ZERO @objc methods** -- ObjC Interceptor cannot reach "
+        "them. The only reliable kill is to pin the verdict pipeline (see "
+        "ENFORCEMENT) and/or a static framework patch + re-sign.",
+        "Replace _dyld_image_count / _dyld_get_image_name to hide injected "
+        "tweaks and defeat DylibInjectionDetector-style scans.",
+        "fishhook / libffi / __interpose symbol-table integrity scans: either "
+        "stop the scan entrypoint (-[* checkInterpose], -[* laSymbolPtrScan]) or "
+        "pin its result to 0.",
+        "Frida port scans (27042 / 27043): hook socket connect() and drop "
+        "connections to those ports if the app probes them.",
     ],
     "ANTI_DEBUG": [
         "Hook sysctl() and when the request is {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid} "
@@ -103,47 +140,80 @@ IOS_GENERIC_FRIDA_HINTS = {
         "rejected. Keep a global JS reference to the NativeCallback so it isn't GC'd.",
         "Legacy BoringSSL verify API: SSL_CTX_set_verify / SSL_set_verify -- force mode "
         "arg to 0 (SSL_VERIFY_NONE); SSL_get_verify_result -> 0.",
-        "TrustKit: TSKPinningValidator.evaluateTrust_forHostname: -> "
-        "TSKTrustEvaluationSuccess (0).",
+        "TrustKit: -[TSKPinningValidator evaluateTrust:forHostname:] -> return 0 "
+        "(TSKTrustEvaluationSuccess). Also stub -[TSKPinningValidator "
+        "handleChallenge:completionHandler:] to invoke the completion with "
+        "disposition 0 (UseCredential) and the proxy credential.",
+        "Alamofire 5+: force -[PinnedCertificatesTrustEvaluator "
+        "evaluate:forHost:] / -[PublicKeysTrustEvaluator evaluate:forHost:] / "
+        "-[CompositeTrustEvaluator evaluate:forHost:] -> no throw. Easiest is to "
+        "replace the whole class's evaluateWithTrust: method to return without "
+        "throwing an error.",
+        "WKWebView in-app browser: -[<Delegate> webView:didReceiveAuthentication"
+        "Challenge:completionHandler:] -> same disposition-0 recipe as "
+        "NSURLSession.",
+        "gRPC: replace grpc_ssl_verify_peer_options.verify_peer_callback with "
+        "one that returns 0 (ok); keep the NativeCallback globally referenced.",
+        "CFNetwork low-level: set kCFStreamSSLValidatesCertificateChain = "
+        "kCFBooleanFalse in any CFReadStreamSetProperty / kCFStreamPropertySSL"
+        "Settings call -- hook CFReadStreamSetProperty and swap the dict.",
     ],
     "ENFORCEMENT": [
-        "Hook consequences, not checks. For AppProtecttXC-style RASP the single highest-"
-        "value hook is +[<AppProtecttImplementation> closeVulnerabilityWithUpdatedRuleId:"
-        "updateRuleTitle:] -- swallow it and the SDK stops calling exit().",
-        "Pin the ObjC-visible verdict pieces: force -[ATSRuleForwardPayload "
-        "threatDetectedFlag] -> 0 and no-op its setter; force -[AppProtecttResponseObject "
-        "vulnerabilityForceAccept] / shouldRemoveVulnerability -> 1 and "
-        "vulnerabilityActionRequired -> 0. Caveat: Swift->Swift reads bypass the ObjC "
-        "getter, so these only help callers that use objc_msgSend.",
-        "Replace libc exit family: exit / _exit / _Exit / exit_group / abort -> log + "
-        "no-op. Keep abort() for crash observability only if you want a tracer.",
+        "Hook consequences, not checks. Any @objc method whose name contains "
+        "'closeVulnerability', 'forceExit', 'enforceVerdict', 'reactToThreat', "
+        "'applyRule', 'blockApp', 'terminateApp' is a top-rank chokepoint -- "
+        "swallow it and every upstream detector becomes moot.",
+        "Verdict DTOs: any @objc getter named vulnerabilityForceAccept, "
+        "shouldRemoveVulnerability, vulnerabilityActionRequired, isCompromised, "
+        "status, severity, threatLevel, threatDetectedFlag -> force to the "
+        "'clean / proceed' value and no-op the setter. CAVEAT: Swift->Swift "
+        "reads bypass the ObjC getter, so these only affect callers using "
+        "objc_msgSend.",
+        "libc exit family: Interceptor.replace exit / _exit / _Exit / "
+        "exit_group / abort -> log + no-op. Attach to kill / tgkill / "
+        "pthread_kill / raise as trace-only first to prove the real gate.",
         "UIKit scene lifecycle: block -[UIApplication terminateWithSuccess / "
-        "_terminateWithStatus: / terminate / workspaceShouldExit:withTransitionContext:] "
-        "AND -[_UISceneLifecycleMultiplexer forceExitWithTransitionContext:scene:]. "
-        "Do NOT touch _evalTransitionToSettings:fromSettings:forceExit:withTransitionStore: "
-        "-- a blanket block wedges UIKit (black screen); a replaceFast gated passthrough "
-        "crashes on normal transitions.",
-        "RASP popup entry points: suppress +[<AppProtecttHandler> "
-        "displayErrorViewWithTitle:message:]; route "
-        "-[<AppProtecttBottomViewController> infoviewSkipButtonTapped / "
-        "infoViewBackButtonTapped / overAllSkipVulnerabilityButtonTapped: / "
-        "handleCloseAppAction] to dismissViewControllerAnimated:completion: instead "
-        "of exit().",
-        "Pure-Swift detectors (classes with zero @objc methods) cannot be reached by "
-        "ObjC Interceptor. A reliable kill requires a static binary patch of the RASP "
-        "framework + re-sign -- note this limitation in the model but do not pretend "
-        "the ObjC hooks neutralise the Swift internals.",
+        "_terminateWithStatus: / terminate / workspaceShouldExit:"
+        "withTransitionContext:] AND -[_UISceneLifecycleMultiplexer "
+        "forceExitWithTransitionContext:scene:]. Do NOT touch "
+        "_evalTransitionToSettings:fromSettings:forceExit:withTransitionStore: "
+        "-- a blanket block wedges UIKit (black screen); a replaceFast gated "
+        "passthrough crashes on normal transitions.",
+        "RASP popup entry points: suppress any @objc selector like "
+        "displayErrorViewWithTitle:message:, showJailbreakAlert, "
+        "presentSecurityWarning, createJailBreakErrorView; route button handlers "
+        "(skip / back / close / dismiss / handleCloseAppAction / "
+        "overAllSkipVulnerabilityButtonTapped:) to "
+        "dismissViewControllerAnimated:completion:.",
+        "Pure-Swift detectors (classes with zero @objc methods, typical of "
+        "commercial RASP) cannot be reached by ObjC Interceptor. A reliable "
+        "kill of the detectors themselves requires a static binary patch of the "
+        "framework + re-sign. Note this limitation; do not pretend ObjC hooks "
+        "neutralise Swift internals.",
     ],
     "RASP_DETECTION": [
-        "Treat RASP as a verdict pipeline, not a set of detectors: find the "
-        "<Framework>.<Impl>.closeVulnerability* / <Framework>.<Verdict>.evaluate* "
-        "ObjC bridges and neutralise them before chasing per-detector methods.",
+        "Treat any commercial RASP SDK as a verdict pipeline, not a set of "
+        "detectors: find its ObjC-bridged dispatch entry (names typically contain "
+        "'close', 'enforce', 'handle', 'react', 'apply', 'Rule', 'Verdict', "
+        "'Threat') and neutralise it before chasing per-detector methods.",
+        "Known-SDK shortcuts (hook if the class is present): "
+        "+[IOSSecuritySuite amIJailbroken / amIDebugged / amIReverseEngineered / "
+        "amIProxied / amIRunInEmulator] -> false; "
+        "+[Approov fetchApproovToken:] -> return a valid token verdict; "
+        "+[AppdomeShield verifyRuntime] -> true; "
+        "-[PromonShieldRuntime isTampered] -> false; "
+        "-[iXGuardRuntime check] -> ok; "
+        "-[ZimperiumZIAP isDeviceCompromised] -> false; "
+        "-[TrusteerMobile detectThreat] -> none; "
+        "-[LookoutClient getThreatStatus] -> clean; "
+        "-[VKeyVOS isVOSSafe] -> true.",
         "If the framework is fully Swift with no @objc methods (symtab has zero "
-        "Swift-mangled function symbols -- common for AppProtecttXC), ObjC hooks only "
-        "reach the UI/dispatch wrapper. Flag this in the model so the operator knows a "
-        "static patch may be required.",
-        "Install hooks EARLY (-f <bundle> spawn + resume) and keep the script LEAN -- "
-        "many RASP SDKs run a timer-driven watchdog that fires if init takes too long.",
+        "Swift-mangled function symbols -- common for high-end commercial RASP "
+        "builds), ObjC hooks only reach the UI / dispatch wrapper. Flag this in "
+        "the model so the operator knows a static patch may be required.",
+        "Install hooks EARLY (frida -f <bundle> spawn + resume) and keep the "
+        "script LEAN -- many RASP SDKs run a timer-driven watchdog that fires "
+        "if script init takes too long.",
     ],
     "HARDCODED_SECRETS": [
         "Audit any API key / token found in __TEXT,__cstring, __TEXT,__objc_methname, "
@@ -159,8 +229,26 @@ IOS_GENERIC_FRIDA_HINTS = {
         "indicates polarity.",
     ],
     "MDM_CHECK": [
-        "Hook configurationProfiles / isSupervised / managedConfig readers to return nil "
-        "/ NO.",
+        "Supervision / managed-config queries: hook "
+        "+[MobileGestalt MGCopyAnswer:] and return NO for kMGQIsSupervised; "
+        "stub -[UIDevice _detailedDeviceProperties] / -[UIDevice isSupervised] "
+        "-> NO; return an empty NSDictionary from NSUserDefaults.standard."
+        "dictionaryForKey_('com.apple.configuration.managed').",
+        "Intune App SDK: force -[IntuneMAMPolicyManager instance] policies to "
+        "benign (-[IntuneMAMPolicy isManagementEnabled] -> NO, "
+        "-[IntuneMAMPolicy isSaveToAllowedForLocation:] -> YES, "
+        "allowedAccounts -> all). Replace +[IntuneMAMEnrollmentManager "
+        "instance].enrollmentStatusForAccountId: -> enrolled.",
+        "AirWatch / Workspace ONE: -[AWController isEnrolled] -> YES; "
+        "-[AWController startWithLaunchOptions:] -> no-op; "
+        "-[AWTunnelService isTunnelEnabled] -> NO.",
+        "MobileIron AppConnect: -[AppConnectInterface authState] -> Authorized; "
+        "-[AppConnectInterface policy] -> permissive.",
+        "BlackBerry Dynamics (Good): -[GDiOS authorize:] completion -> success; "
+        "-[GDiOS state] -> GDAppStateAuthorized.",
+        "Jamf / Kandji / Mosyle / Addigy / Hexnode / SOTI / Scalefusion: "
+        "enumerate the vendor's status/isEnrolled/isCompliant/isCompromised "
+        "selectors and force them to the compliant value.",
     ],
 }
 
@@ -208,8 +296,65 @@ IOS_CHOKEPOINT_SIGNATURES = {
     # BoringSSL / SecTrust (reach them via Module.findExportByName)
     "SSL_CTX_set_custom_verify":              ("terminal_action", 1),
     "SSL_set_custom_verify":                  ("terminal_action", 1),
+    "SSL_CTX_set_verify":                     ("terminal_action", 1),
+    "SSL_set_verify":                         ("terminal_action", 1),
+    "SSL_CTX_set_cert_verify_callback":       ("terminal_action", 1),
+    "SSL_get_verify_result":                  ("boolean_gate", 3),
     "SecTrustEvaluateWithError":              ("boolean_gate", 3),
     "SecTrustGetTrustResult":                 ("boolean_gate", 3),
+    "SecTrustEvaluate":                       ("boolean_gate", 3),
+    "SecTrustSetAnchorCertificates":          ("boolean_gate", 3),
+    "SecTrustSetAnchorCertificatesOnly":      ("boolean_gate", 3),
+    # Alamofire 5+ trust evaluators
+    "PinnedCertificatesTrustEvaluator":       ("boolean_gate", 3),
+    "PublicKeysTrustEvaluator":               ("boolean_gate", 3),
+    "DisabledTrustEvaluator":                 ("boolean_gate", 3),
+    # TrustKit
+    "TSKPinningValidator":                    ("boolean_gate", 3),
+    "evaluateTrust:forHostname:":             ("boolean_gate", 3),
+    # AFNetworking
+    "AFSecurityPolicy":                       ("boolean_gate", 3),
+    "evaluateServerTrust:forDomain:":         ("boolean_gate", 3),
+    "AFSSLPinningMode":                       ("boolean_gate", 3),
+    # WKWebView auth challenge
+    "webView:didReceiveAuthenticationChallenge:completionHandler:": ("reaction_dispatch", 2),
+    # gRPC
+    "GRPC_SSL_CERT_VERIFY_CALLBACK":          ("terminal_action", 1),
+    "grpc_ssl_verify_peer_options":           ("terminal_action", 1),
+    # Code-signing APIs (reach via Module.findExportByName)
+    "SecCodeCheckValidity":                   ("boolean_gate", 3),
+    "SecStaticCodeCheckValidity":             ("boolean_gate", 3),
+    "SecCodeCopySigningInformation":          ("boolean_gate", 3),
+    # LocalAuthentication (biometric gate)
+    "evaluatePolicy":                         ("boolean_gate", 3),
+    "deviceOwnerAuthentication":              ("boolean_gate", 3),
+    "deviceOwnerAuthenticationWithBiometrics": ("boolean_gate", 3),
+    # Debug detection (reach via Module.findExportByName / inline svc)
+    "ptrace":                                 ("boolean_gate", 3),
+    "PT_DENY_ATTACH":                         ("boolean_gate", 3),
+    "sysctl":                                 ("boolean_gate", 3),
+    "AmIBeingDebugged":                       ("boolean_gate", 3),
+    # IOSSecuritySuite (open-source RASP)
+    "amIJailbroken":                          ("boolean_gate", 3),
+    "amIDebugged":                            ("boolean_gate", 3),
+    "amIReverseEngineered":                   ("boolean_gate", 3),
+    "amIProxied":                             ("boolean_gate", 3),
+    "amIRunInEmulator":                       ("boolean_gate", 3),
+    # Approov
+    "fetchApproovToken":                      ("terminal_action", 1),
+    "ApproovTokenFetchResult":                ("terminal_action", 1),
+    # TrollStore / rootless marker
+    "/var/jb":                                ("detector", 4),
+    # Intune MAM policy enforcement
+    "IntuneMAMPolicyManager":                 ("terminal_action", 1),
+    "isManaged":                              ("boolean_gate", 3),
+    "isSupervised":                           ("boolean_gate", 3),
+    "kMGQIsSupervised":                       ("boolean_gate", 3),
+    # AirWatch
+    "AWController":                           ("terminal_action", 1),
+    # BlackBerry Dynamics
+    "GDiOS":                                  ("terminal_action", 1),
+    "GDAuthenticate":                         ("boolean_gate", 3),
 }
 
 # libc / system exports that are terminal actions when seen in iOS findings.
@@ -520,13 +665,13 @@ def build_ios_security_model(apk_name, source_findings, native_string_findings,
         patch_log=patch_records or [],
         tool_warnings=warnings,
         disclaimer=(
-            "iOS static model. `runtime_class` is the ObjC runtime name (Swift mangled "
-            "classes are demangled where recognisable: _TtC13AppProtecttXC25... -> "
-            "AppProtecttXC....); verify with ObjC.classes[name] at runtime before "
+            "iOS static model. `runtime_class` is the ObjC runtime name (Swift "
+            "mangled classes are demangled where recognisable: `_TtC<N>Module<M>Name` "
+            "-> `Module.Name`); verify with ObjC.classes[name] at runtime before "
             "hooking. `is_pure_swift: true` + `swift_reachable_via_objc: false` means "
             "the class has no @objc methods -- an ObjC Interceptor cannot reach it and a "
             "static binary patch of the framework may be required. Prefer the ranked "
-            "`enforcement_chokepoints` over per-detector hooks (see walkthrough.md)."
+            "`enforcement_chokepoints` over per-detector hooks."
         ),
     )
 
@@ -578,16 +723,18 @@ This model ranks **{n_choke} enforcement chokepoints** in
 `enforcement_chokepoints` (sorted by `enforcement_rank`, 1 = highest value). On
 iOS the few points where a failed verdict becomes an action are:
 
-1. **`enforcement_rank: 1`** -- SDK verdict dispatcher (e.g.
-   `+[*.AppProtecttImplementation closeVulnerabilityWithUpdatedRuleId:
-   updateRuleTitle:]`), the libc exit family, UIKit scene exit
+1. **`enforcement_rank: 1`** -- SDK verdict dispatchers (any @objc selector
+   whose name contains `closeVulnerability` / `forceExit` / `enforceVerdict` /
+   `reactToThreat` / `applyRule`), the libc exit family, UIKit scene exit
    (`-[UIApplication terminate*]`, `-[_UISceneLifecycleMultiplexer
-   forceExitWithTransitionContext:scene:]`), and BoringSSL custom_verify.
-2. **`enforcement_rank: 2`** -- reaction dispatchers (popup / sheet / button
-   handlers routed to dismiss instead of exit).
+   forceExitWithTransitionContext:scene:]`), and BoringSSL `custom_verify`.
+2. **`enforcement_rank: 2`** -- reaction dispatchers (popup / sheet /
+   jailbreak-error view builders, button handlers routed to dismiss instead
+   of exit).
 3. **`enforcement_rank: 3`** -- boolean gates: `shouldTrustProtectionSpace:`,
-   `isJailbroken`, `vulnerabilityForceAccept`, `threatDetectedFlag`, Mobeix
-   `getApplicationShouldBlock*Devices`. Force them to the clean / proceed value.
+   `isJailbroken` / `amIJailbroken` / `isCompromised`, verdict getters
+   (`vulnerabilityForceAccept`, `threatDetectedFlag`, `status`), app-local
+   `shouldBlock*` config booleans. Force them to the clean / proceed value.
 4. **`enforcement_rank: 4+`** -- individual detectors (`defense_mechanisms[]`).
 
 ## iOS-specific pitfalls (apply all)

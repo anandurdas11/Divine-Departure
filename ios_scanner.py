@@ -299,6 +299,267 @@ IOS_INSECURE_APIS = [
      "Explicit jailbreak detection method."),
     (r"IOKit|IOService", "ROOT_DETECTION", "low",
      "IOKit framework usage -- may be used for hardware-level jailbreak checks."),
+
+    # ==================================================================
+    # Comprehensive iOS catalog -- popular JB paths, RASP SDKs, MDM
+    # vendors, pinning stacks, anti-debug/hook, keychain weakness, MITM
+    # proxy clients. Scanned against decompiled source / stringrefs.
+    # ==================================================================
+
+    # ---- Jailbreak paths (classic + rootless + rootless-v2) ----
+    (r"/Applications/Cydia\.app|/Applications/Sileo\.app|/Applications/Zebra\.app|"
+     r"/Applications/Installer\.app|/Applications/RockApp\.app|/Applications/Icy\.app|"
+     r"/Applications/WinterBoard\.app|/Applications/SBSettings\.app|/Applications/MxTube\.app|"
+     r"/Applications/IntelliScreen\.app|/Applications/FakeCarrier\.app|"
+     r"/Applications/blackra1n\.app|/Applications/Snoop-itConfig\.app", "ROOT_DETECTION", "high",
+     "Classic jailbreak application bundle path checked by detector."),
+    (r"/Library/MobileSubstrate|/Library/MobileSubstrate/MobileSubstrate\.dylib|"
+     r"/Library/MobileSubstrate/DynamicLibraries|/Library/Substitute|"
+     r"/Library/Frameworks/CydiaSubstrate\.framework", "ROOT_DETECTION", "high",
+     "MobileSubstrate / Substitute hooking framework path."),
+    (r"/private/var/lib/apt|/private/var/lib/cydia|/private/var/stash|"
+     r"/private/var/mobile/Library/SBSettings|/private/var/tmp/cydia\.log|"
+     r"/private/var/cache/apt|/private/etc/apt|/etc/apt", "ROOT_DETECTION", "high",
+     "APT / Cydia / stash path used in iOS jailbreak detection."),
+    (r"/bin/bash|/bin/sh\b|/bin/zsh\b|/usr/bin/ssh\b|/usr/sbin/sshd|/usr/libexec/sftp-server|"
+     r"/usr/libexec/ssh-keysign|/usr/sbin/frida-server", "ROOT_DETECTION", "high",
+     "Shell / ssh / frida binary path -- only present on jailbroken device."),
+    (r"/System/Library/LaunchDaemons/com\.ikey\.bbot\.plist|"
+     r"/System/Library/LaunchDaemons/com\.saurik\.Cydia\.Startup\.plist|"
+     r"/System/Library/LaunchDaemons/com\.openssh\.sshd\.plist", "ROOT_DETECTION", "high",
+     "Jailbreak LaunchDaemon plist in /System/Library."),
+    (r"/usr/lib/libjailbreak\.dylib|/usr/lib/libsubstitute\.dylib|/usr/lib/substitute-loader\.dylib|"
+     r"/usr/lib/libhooker\.dylib|/usr/lib/TweakInject\.dylib|/usr/lib/TweakInject|"
+     r"/usr/lib/libblackjack\.dylib|/usr/lib/ellekit\.dylib|/usr/lib/choicy\.dylib|"
+     r"/usr/lib/rocketbootstrap\.dylib|/usr/lib/pspawn_payload\.dylib",
+     "ROOT_DETECTION", "high",
+     "Jailbreak injector / tweakloader dylib path."),
+    (r"/var/jb\b|/var/LIB\b|/var/mobile/Library/\.jailbreak|/var/containers/Bundle/tweaksupport|"
+     r"/private/preboot/[^/]+/active|/cores/jbroot|/.jbroot-[0-9A-F]+|/\.installed_dopamine",
+     "ROOT_DETECTION", "high",
+     "Rootless jailbreak (/var/jb) / Dopamine / RootHide path marker."),
+    (r"/opt/simject|/opt/procursus|/var/mobile/Library/Preferences/com\.ex\.substitute\.plist",
+     "ROOT_DETECTION", "high",
+     "Procursus / Simject / Substitute marker path."),
+    (r"TrollStore|TrollInstaller|/private/preboot/Cryptexes/App/System/Applications/TrollStore\.app",
+     "ROOT_DETECTION", "high",
+     "TrollStore (persistence tool, works on JB-less devices with vuln)."),
+    (r"canOpenURL.*(?:cydia|sileo|zbra|zebra|undecimus|filza|activator|checkra1n|palera1n)://|"
+     r"\b(?:cydia|sileo|zbra|zebra|undecimus|filza|activator)://", "ROOT_DETECTION", "high",
+     "URL scheme probed to detect jailbreak store/tweak installer."),
+    (r"\b(?:unc0ver|checkra1n|taurine|odyssey|chimera|electra|phoenix|meridian|"
+     r"fugu14|fugu15|xinaa15|palera1n|dopamine|serotonin|bakera1n|roothide|jelbrek)\b",
+     "ROOT_DETECTION", "high",
+     "Specific jailbreak tool name referenced in string table."),
+
+    # ---- JB detection libraries / Cordova / React-Native plugins ----
+    (r"\bRSADJailbreakDetector\b|\bJailbreakDetector\b|\bRNJailMonkey\b|"
+     r"\breact-native-jail-monkey\b|\breact-native-root-detection\b|"
+     r"\bcordova-plugin-jailbreak-detect\b|\bOWASPJailbreakDetector\b",
+     "ROOT_DETECTION", "high",
+     "Known iOS jailbreak-detection library / Cordova / RN plugin."),
+    (r"\bOutsystemsNativeShell\b", "ROOT_DETECTION", "medium",
+     "OutSystems native shell -- bundles its own jailbreak detector."),
+
+    # ---- Jailbreak behaviour tests (sandbox escape / fork / symlink) ----
+    (r"\bfork\s*\(\s*\)|\bvfork\s*\(\s*\)|\bposix_spawn\b|\bexecve\s*\(", "ROOT_DETECTION", "high",
+     "fork / vfork / posix_spawn / execve -- sandboxed iOS apps cannot fork; "
+     "returning a valid child pid proves jailbreak."),
+    (r'\bsymlink\s*\(\s*"[^"]+"\s*,\s*"/private/', "ROOT_DETECTION", "high",
+     "symlink(..., /private/...) -- sandbox-write escape test."),
+    (r'\bmkdir\s*\(\s*"/private/[^"]*"', "ROOT_DETECTION", "high",
+     "mkdir in /private -- sandbox-escape write test."),
+    (r"PT_DENY_ATTACH\s*=?\s*31|ptrace\s*\(\s*31", "ANTI_DEBUG", "high",
+     "Explicit PT_DENY_ATTACH (31) ptrace() call."),
+
+    # ---- Comprehensive RASP / app-shielding SDKs (iOS) ----
+    (r"\bAppdome\b|\bAppdome\.", "RASP_DETECTION", "high",
+     "Appdome RASP / build-time hardening SDK."),
+    (r"\bVerimatrix\b|\bWhiteCryption\b|\bWhiteBox\b|\bcryptoKernel\b",
+     "RASP_DETECTION", "high",
+     "Verimatrix / WhiteCryption / Intertrust app-shielding SDK."),
+    (r"\bOneSpan\b|\bVASCO\b|\bDigipass\b", "RASP_DETECTION", "high",
+     "OneSpan (VASCO) Mobile Security Suite / Digipass."),
+    (r"\bJscrambler\b|\bjscrambler-ios\b", "RASP_DETECTION", "high",
+     "Jscrambler iOS runtime protection."),
+    (r"\bBuild38\b|\bT\.?A\.?K\b|\bbuild38-tak\b", "RASP_DETECTION", "high",
+     "Build38 T.A.K. RASP SDK."),
+    (r"\bZimperium\b|\bzIAP\b|\bzDefend\b|\bz3A\b|\bZDefend\b|\bZips\b",
+     "RASP_DETECTION", "high",
+     "Zimperium zIAP / zDefend MTD SDK."),
+    (r"\bDynatrace\b|\bOneAgent\b|\bAppMon\b", "RASP_DETECTION", "medium",
+     "Dynatrace OneAgent / Mobile Security SDK."),
+    (r"\bLookOut\b|\bLookoutSDK\b|\bLookoutMobile\b", "RASP_DETECTION", "high",
+     "Lookout Mobile Security SDK."),
+    (r"\bPradeo\b|\bPradeoRuntime\b", "RASP_DETECTION", "high",
+     "Pradeo Mobile Threat Defense SDK."),
+    (r"\bV-Key\b|\bVKey\b|\bVKeySDK\b|\bVOS\b", "RASP_DETECTION", "high",
+     "V-Key V-OS mobile protection SDK."),
+    (r"\bNowSecure\b|\bNSAgent\b", "RASP_DETECTION", "medium",
+     "NowSecure MobileRASP SDK."),
+    (r"\bAppknox\b|\bAppknoxShield\b", "RASP_DETECTION", "medium",
+     "Appknox mobile RASP SDK."),
+    (r"\bEnSilo\b|\bEntrustIdentityGuard\b|\bIdentityGuardMobile\b",
+     "RASP_DETECTION", "medium",
+     "EnSilo / Entrust IdentityGuard mobile SDK."),
+    (r"\bShapeSecurity\b|\bShapeBlackBird\b|\bF5Shape\b|\bF5MobileSDK\b",
+     "RASP_DETECTION", "high",
+     "Shape Security / F5 BIG-IP mobile fraud SDK."),
+    (r"\bIBMTrusteer\b|\bTrusteerRapport\b|\bTrusteerMobile\b|\bPinpointAssure\b|"
+     r"\btrusteer_sdk\b", "RASP_DETECTION", "high",
+     "IBM Trusteer Mobile Fraud SDK (Pinpoint Assure, Rapport)."),
+    (r"\bFinastra\b|\bFusionMobile\b", "RASP_DETECTION", "medium",
+     "Finastra Fusion Mobile banking SDK."),
+    (r"\bFingerprint\b.*\bPro\b|\bFingerprintJS\b|\bFingerprintPro\b|\bFPJS\b",
+     "RASP_DETECTION", "medium",
+     "Fingerprint.com (FingerprintJS Pro) mobile device-identification SDK."),
+    (r"\bMetafora\b|\bInsideSecure\b|\bSFNT\b", "RASP_DETECTION", "medium",
+     "Inside Secure / Metafora / SafeNet mobile SDK."),
+    (r"\bImmuni\b|\bmProtect\b|\bAppCertify\b", "RASP_DETECTION", "medium",
+     "Immuni / mProtect / AppCertify mobile shield SDK."),
+    (r"\bAppProtectt(?:XC)?\b|\bATSRuleForwardPayload\b|\bAppProtecttResponseObject\b|"
+     r"\bAppProtecttServiceManager\b|\bAppProtecttImplementation\b|\bAppProtecttHandler\b|"
+     r"\bAppProtecttBottomViewController\b", "RASP_DETECTION", "high",
+     "AppProtecttXC commercial RASP SDK."),
+    (r"\bMobeix\b|\bMx_(?:DeviceHardware|AppManager|ApplicationWrapper|SecuredData|"
+     r"BaseHTTPClient|CommunicationManager|Notification|Services)\b", "RASP_DETECTION", "high",
+     "Mobeix mobile banking SDK (SDL / in-app RASP)."),
+    (r"\bKonyMobileFabric\b|\bKonyVisualizer\b|\bKonyVM\b", "RASP_DETECTION", "medium",
+     "Kony MobileFabric / Visualizer SDK."),
+    (r"\bAppInspector\b|\bAppScan\b|\bHCLAppScan\b", "RASP_DETECTION", "medium",
+     "HCL / IBM AppScan runtime check."),
+    (r"\bRapid7\b|\bRapid7Mobile\b", "RASP_DETECTION", "medium",
+     "Rapid7 mobile security SDK."),
+    (r"\bBlurr\b|\bBlurrbox\b", "RASP_DETECTION", "medium",
+     "Blurr / Blurrbox mobile hardening SDK."),
+
+    # ---- Comprehensive SSL pinning / TLS stacks ----
+    (r"\bPinnedCertificatesTrustEvaluator\b|\bPublicKeysTrustEvaluator\b|"
+     r"\bDisabledTrustEvaluator\b|\bRevocationTrustEvaluator\b|\bCompositeTrustEvaluator\b",
+     "SSL_PINNING", "high",
+     "Alamofire 5+ ServerTrustEvaluator variants."),
+    (r"\bTSKPinningValidator\b|\bTSKPinningValidator_Result\b|\bTSKTrustEvaluationFailed\b|"
+     r"\bTSKEnforcePinning\b|\bTSKIncludeSubdomains\b|\bTSKPublicKeyHashes\b|"
+     r"\bTSKPublicKeyAlgorithms\b|\bTSKDisableDefaultReportUri\b",
+     "SSL_PINNING", "high",
+     "TrustKit pinning validator / configuration keys."),
+    (r"\bSecTrustSetAnchorCertificates\b|\bSecTrustSetAnchorCertificatesOnly\b|"
+     r"\bSecTrustCopyPublicKey\b|\bSecTrustCopyKey\b|\bSecTrustCopyExceptions\b|"
+     r"\bSecTrustSetExceptions\b|\bSecCertificateCopyData\b|"
+     r"\bSecKeyCopyExternalRepresentation\b|\bSecCertificateCreateWithData\b",
+     "SSL_PINNING", "high",
+     "SecTrust / SecCertificate low-level pinning API."),
+    (r"\bkCFStreamSSLValidatesCertificateChain\b|\bkCFStreamPropertySSLSettings\b|"
+     r"\bCFReadStreamSetProperty\b|\bCFNetworkCopyProxiesForURL\b", "SSL_PINNING", "high",
+     "CFNetwork low-level SSL settings / proxy detection."),
+    (r"\bGRPC_SSL_CERT_VERIFY_CALLBACK\b|\bgrpc_ssl_credentials_create\b|"
+     r"\bgrpc_ssl_verify_peer_options\b", "SSL_PINNING", "high",
+     "gRPC SSL cert-verify callback."),
+    (r"\bSSL_CTX_set_cert_verify_callback\b|\bSSL_CTX_set_verify_depth\b|"
+     r"\bSSL_use_certificate_file\b|\bSSL_CTX_use_PrivateKey_file\b",
+     "SSL_PINNING", "high",
+     "BoringSSL / OpenSSL certificate verification helpers."),
+    (r"\bNSURLSessionConfiguration.*connectionProxyDictionary\b|"
+     r"\bCFNetworkCopySystemProxySettings\b", "SSL_PINNING", "medium",
+     "Proxy-config query -- may be used to detect MITM proxy."),
+    (r"\bwebView\s*:\s*didReceiveAuthenticationChallenge\b|"
+     r"\bwebView:didReceiveServerRedirectForProvisionalNavigation\b",
+     "SSL_PINNING", "medium",
+     "WKWebView / UIWebView auth-challenge delegate (pinning for in-app browser)."),
+    (r"\bCFReadStreamCreateForHTTPRequest\b|\bNSStreamSocketSecurityLevelTLSv1\b",
+     "SSL_PINNING", "low",
+     "Low-level CFStream / NSStream TLS configuration."),
+    (r"\bURLCredentialStorage\b|\bNSURLCredentialStorage\b", "SSL_PINNING", "low",
+     "URLCredentialStorage -- credential cache (sometimes used to inject proxy creds)."),
+
+    # ---- MITM proxy detection ----
+    (r"\bCharles(?:Proxy)?\b|\bProxyman\b|\bmitmproxy\b|\bBurp\s*Suite\b|\bFiddler\b|"
+     r"\bHTTPToolkit\b|\bRequestly\b|\bOhttp\b", "SSL_PINNING", "high",
+     "MITM proxy name string -- likely MITM-proxy detection list."),
+    (r"\bchls\.pro\b|\bproxyman\.io\b|\bmitm\.it\b|\bburpsuite\.com\b",
+     "SSL_PINNING", "high",
+     "MITM proxy CA download URL referenced."),
+
+    # ---- Comprehensive MDM / EMM vendor SDKs ----
+    (r"\bAirWatch\b|\bAWSDK\b|\bWorkspaceONE\b|\bvmwareWorkspace\b|\bAWController\b",
+     "MDM_CHECK", "high",
+     "VMware AirWatch / Workspace ONE SDK."),
+    (r"\bMicrosoftIntune\b|\bIntuneMAM\b|\bIntuneAppSDK\b|\bIntuneSDK\b|\bIntuneAttestation\b|"
+     r"\bADALiOS\b|\bMSAL\b", "MDM_CHECK", "high",
+     "Microsoft Intune App SDK (MAM / Conditional Access)."),
+    (r"\bMobileIron\b|\bAppConnect\b|\bMIAppConnect\b|\bAppStation\b|\bIvantiNeurons\b",
+     "MDM_CHECK", "high",
+     "MobileIron / Ivanti AppConnect SDK."),
+    (r"\bMaaS360\b|\bIBMMaaS360\b|\bMaaS360AppSDK\b", "MDM_CHECK", "high",
+     "IBM MaaS360 Mobile App SDK."),
+    (r"\bHexnode\b|\bSOTIMobiControl\b|\bScalefusion\b|\bMiradore\b|\bManageEngineMDM\b|"
+     r"\bCitrixEndpointManagement\b|\bXenMobile\b", "MDM_CHECK", "high",
+     "Hexnode / SOTI / Scalefusion / Citrix / ManageEngine MDM SDK."),
+    (r"\bBlackBerryUEM\b|\bBlackBerryDynamics\b|\bGoodDynamics\b|\bBBDynamics\b",
+     "MDM_CHECK", "high",
+     "BlackBerry UEM / Dynamics (Good) SDK."),
+    (r"\bAutomatedDeviceEnrollment\b|\bDeviceEnrollmentProgram\b|\bVolumePurchaseProgram\b|"
+     r"\bAppleBusinessManager\b|\bAppleSchoolManager\b|\bUMManagedAppConfiguration\b",
+     "MDM_CHECK", "high",
+     "Apple DEP / ADE / VPP / Business/School Manager API."),
+    (r"\bUIManagedConfiguration\b|\bcom\.apple\.configuration\.managed\b|"
+     r"\bcom\.apple\.feedback\.managed\b|\bNSUserDefaults.*ManagedConfig\b",
+     "MDM_CHECK", "high",
+     "Managed app configuration dictionary (MDM-pushed settings)."),
+    (r"\bNEHotspotHelper\b|\bNEVPNManager\b|\bNEDNSSettingsManager\b|"
+     r"\bNETunnelProviderManager\b", "MDM_CHECK", "medium",
+     "NetworkExtension API -- usually gated behind MDM entitlement."),
+    (r"\bMGCopyAnswer\b|\bkMGQIsSupervised\b|\bkMGQMobileEquipmentIdentifier\b|"
+     r"\bkMGQInternationalMobileEquipmentIdentity\b|\bkMGQIntegratedCircuitCardIdentity\b|"
+     r"\bkMGQInternationalMobileSubscriberIdentity\b", "MDM_CHECK", "high",
+     "MobileGestalt private key query (supervision / IMEI / IMSI / ICCID)."),
+
+    # ---- Keychain / data-protection weakness ----
+    (r"\bkSecAttrAccessibleAlways\b|\bkSecAttrAccessibleAlwaysThisDeviceOnly\b",
+     "HARDCODED_SECRETS", "high",
+     "Keychain item accessible without unlock -- weakest data-protection class."),
+    (r"\bNSFileProtectionNone\b", "HARDCODED_SECRETS", "high",
+     "NSFileProtectionNone on disk file -- plaintext at rest."),
+    (r"\bLAContext\b|\bLocalAuthentication\b|\bevaluatePolicy\b|"
+     r"\bdeviceOwnerAuthenticationWithBiometrics\b", "INTEGRITY_CHECK", "medium",
+     "LocalAuthentication / biometric gate -- bypass surface."),
+
+    # ---- Integrity / codesign ----
+    (r"\bSecCodeCheckValidity\b|\bSecStaticCodeCheckValidity\b|"
+     r"\bSecCodeCopySigningInformation\b|\bSecCodeCopyGuestWithAttributes\b|"
+     r"\bSecRequirementCreateWithString\b", "INTEGRITY_CHECK", "high",
+     "Security.framework code-signing validation API."),
+    (r"\bcsops\b|\bCS_HARD\b|\bCS_KILL\b|\bCS_RESTRICT\b|\bCS_PLATFORM_BINARY\b|"
+     r"\bCS_FORCED_LV\b|\bCS_VALID\b|\bCS_ADHOC\b|\bCS_GET_TASK_ALLOW\b",
+     "INTEGRITY_CHECK", "high",
+     "csops() syscall / code-signing flag constants."),
+    (r"\bLC_CODE_SIGNATURE\b|\bLC_ENCRYPTION_INFO(?:_64)?\b|\bLC_SEGMENT(?:_64)?\b.*__TEXT",
+     "INTEGRITY_CHECK", "medium",
+     "Mach-O load-command inspection (code-signature / encryption-info / __TEXT)."),
+
+    # ---- Anti-hook / anti-tamper (iOS-specific) ----
+    (r"\b/usr/lib/libSystem\.B\.dylib\b|\b/usr/lib/dyld\b", "ANTI_HOOK", "low",
+     "libSystem / dyld path check -- integrity reference baseline."),
+    (r"\bFridaGadget\.dylib\b|\blibFridaGadget\.dylib\b|\bgum-js-loop\b|\bgmain\b|"
+     r"\bgdbus\b|\bfrida-gum\b|\bgumjscript\b", "ANTI_HOOK", "high",
+     "Frida gadget / gum runtime string."),
+    (r"\bobjection\b|\b/tmp/objection\b", "ANTI_HOOK", "high",
+     "Objection runtime string -- Frida wrapper."),
+    (r"\blibhooker\b|\bellekit\b|\broothide\b|\bsubstitute\b|\bchoicy\b|\brocketbootstrap\b|"
+     r"\blibblackjack\b|\blibroot\b|\btweakinject\b|\blibinjector\b",
+     "ANTI_HOOK", "high",
+     "Rootless-JB infrastructure name (libhooker / ellekit / substitute / etc.)."),
+    (r"\bgetenv\s*\(\s*\"DYLD_INSERT_LIBRARIES\"", "ANTI_HOOK", "high",
+     "Reads DYLD_INSERT_LIBRARIES environment variable (injection check)."),
+    (r"\b__RESTRICT\b.*\b__restrict\b|\brestrict\s+segment\b", "ANTI_HOOK", "medium",
+     "__RESTRICT segment -- blocks DYLD_INSERT_LIBRARIES injection."),
+
+    # ---- Anti-debug (extras) ----
+    (r"\bmach_task_self\b|\btask_for_pid\b|\bthread_create_running\b",
+     "ANTI_DEBUG", "medium",
+     "Mach task API -- used to detect task-level debugger / instrumentation."),
+    (r"\bisatty\b|\bioctl\b.*TIOCGWINSZ", "ANTI_DEBUG", "low",
+     "isatty / TIOCGWINSZ -- tty check sometimes used to detect lldb."),
 ]
 
 # Compile iOS patterns once
@@ -929,6 +1190,233 @@ _OBJC_SECURITY_PATTERNS = [
      "SSL_PINNING", "low",
      "React Native networking entry -- useful for request capture (sendRequest:"
      "responseSender:) and CSPRNG key correlation."),
+
+    # ======================================================================
+    # Comprehensive iOS ObjC-metadata catalog -- popular JB libs, RASP SDKs,
+    # pinning stacks, MDM vendors, anti-debug/hook class names. Matched
+    # against __objc_classname / __objc_methnames extracted from Mach-O.
+    # ======================================================================
+
+    # ---- Jailbreak detection libraries (ObjC class names) ----
+    (re.compile(r"IOSSecuritySuite|DTTJailbreakDetection|RSADJailbreakDetector|"
+                r"RNJailMonkey|JailbreakDetection|JailbreakChecker|JailBreakTest|"
+                r"OWASPJailbreakDetector|FBJailBreakDetector|AntiJailBreak",
+                re.IGNORECASE), "ROOT_DETECTION", "high",
+     "Known iOS jailbreak-detection library class in ObjC metadata."),
+    (re.compile(r"HiddenCheck|StealthDetector|StealthJailbreak", re.IGNORECASE),
+     "ROOT_DETECTION", "medium",
+     "'Stealth'/'Hidden' jailbreak-detection naming pattern in ObjC class."),
+
+    # ---- Comprehensive RASP vendor SDKs (ObjC class names) ----
+    (re.compile(r"\bAppdome(?:[A-Z][a-zA-Z0-9]*)?|ADThreatProtection|ADSecurity|"
+                r"ADAntiTamper|ADAntiDebug|ADJailbreakDetect|ADEmulator",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "Appdome RASP class in ObjC metadata."),
+    (re.compile(r"\bPromon(?:Shield|Sdk|Loader|Runtime)?\b|SHIELD(?:Core|Runtime|Loader)",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "Promon SHIELD iOS app-protection class in ObjC metadata."),
+    (re.compile(r"\biXGuard\b|GuardSquareShield|DexGuardRuntime", re.IGNORECASE),
+     "RASP_DETECTION", "high",
+     "GuardSquare iXGuard / DexGuard runtime class in ObjC metadata."),
+    (re.compile(r"Verimatrix|WhiteCryption|CryptoKernel|SecureKey", re.IGNORECASE),
+     "RASP_DETECTION", "high",
+     "Verimatrix / Intertrust WhiteCryption SDK in ObjC metadata."),
+    (re.compile(r"OneSpan(?:Mobile|Shield|Security)?|VASCO|Digipass",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "OneSpan (VASCO) Mobile Security Suite in ObjC metadata."),
+    (re.compile(r"Jscrambler(?:[A-Z][a-zA-Z0-9]*)?", re.IGNORECASE),
+     "RASP_DETECTION", "high",
+     "Jscrambler iOS runtime protection in ObjC metadata."),
+    (re.compile(r"Build38|TAKRuntime|TakClient|B38(?:Shield|Protection)?",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "Build38 T.A.K. iOS RASP SDK in ObjC metadata."),
+    (re.compile(r"Zimperium|\bzIAP\b|\bzDefend\b|\bzIPS\b|ZDTECH|ZDefend",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "Zimperium zIAP / zDefend MTD SDK in ObjC metadata."),
+    (re.compile(r"CriticalBlue|Approov(?:Service|Attestation)?|ApproovTokenFetchResult",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "CriticalBlue Approov attestation SDK in ObjC metadata."),
+    (re.compile(r"TrusteerSDK|TrusteerMobile|TRPinpointAssure|TRRapport|TRMobileSDK|"
+                r"IBMPinpoint|IBMTrusteer", re.IGNORECASE), "RASP_DETECTION", "high",
+     "IBM Trusteer Mobile Fraud SDK in ObjC metadata."),
+    (re.compile(r"Lookout(?:Mobile|Security|Agent|Client|SDK)?|LKSecurity|LKAgent",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "Lookout Mobile Security SDK in ObjC metadata."),
+    (re.compile(r"\bPradeo\b|PradeoRuntime|PradeoSDK|PRRuntime",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "Pradeo Mobile Threat Defense SDK in ObjC metadata."),
+    (re.compile(r"\bV\-?Key\b|VKeySDK|VOSApp|VOSThirdParty|V_?OS(?:Platform)?",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "V-Key V-OS Mobile Protection SDK in ObjC metadata."),
+    (re.compile(r"ShapeSecurity|ShapeBlackBird|F5ShapeMobile|F5MobileSDK|BIGIP",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "Shape Security / F5 BIG-IP Mobile SDK in ObjC metadata."),
+    (re.compile(r"InsideSecure|SafeNet|SFNT(?:[A-Z][a-zA-Z0-9]*)?|Metafora",
+                re.IGNORECASE), "RASP_DETECTION", "medium",
+     "Inside Secure / SafeNet / Metafora SDK in ObjC metadata."),
+    (re.compile(r"NowSecure|NSAgent|NSMobile", re.IGNORECASE),
+     "RASP_DETECTION", "medium",
+     "NowSecure Mobile SDK in ObjC metadata."),
+    (re.compile(r"Appknox|AKShield|AKRuntime", re.IGNORECASE),
+     "RASP_DETECTION", "medium",
+     "Appknox Mobile RASP SDK in ObjC metadata."),
+    (re.compile(r"Blurr(?:box)?|BlurrSDK|BlurrShield", re.IGNORECASE),
+     "RASP_DETECTION", "medium",
+     "Blurr / Blurrbox mobile hardening SDK in ObjC metadata."),
+    (re.compile(r"KonyMobileFabric|KonyVisualizer|KonyVM|KSync",
+                re.IGNORECASE), "RASP_DETECTION", "medium",
+     "Kony MobileFabric / Visualizer SDK in ObjC metadata."),
+    (re.compile(r"Rapid7(?:[A-Z][a-zA-Z0-9]*)?", re.IGNORECASE),
+     "RASP_DETECTION", "medium",
+     "Rapid7 mobile security SDK in ObjC metadata."),
+    (re.compile(r"\bImmuni\b|\bmProtect\b|AppCertify|AppImmuni",
+                re.IGNORECASE), "RASP_DETECTION", "medium",
+     "Immuni / mProtect / AppCertify mobile shield SDK in ObjC metadata."),
+    (re.compile(r"FingerprintJS|FingerprintPro|FPJS|FPJSPro",
+                re.IGNORECASE), "RASP_DETECTION", "medium",
+     "Fingerprint.com (FingerprintJS Pro) mobile SDK in ObjC metadata."),
+
+    # ---- Mobeix (full class name list) ---------------------------------------
+    (re.compile(r"\bMx_(?:DeviceHardware|AppManager|ApplicationWrapper|SecuredData|"
+                r"BaseHTTPClient|CommunicationManager|Notification|Services|"
+                r"Keychain|Logger|SessionManager|HTTPRequest|HTTPResponse|"
+                r"Encryption|Decryption|CryptoHelper|JailbreakChecker)\b"),
+     "RASP_DETECTION", "high",
+     "Mobeix (Mx_*) mobile-banking in-app class in ObjC metadata."),
+
+    # ---- Comprehensive SSL pinning (ObjC class names) ----
+    (re.compile(r"\bAFSecurityPolicy\b|\bAFSSLPinningMode\b|\bAFHTTPSessionManager\b|"
+                r"\bAFURLSessionManager\b"), "SSL_PINNING", "high",
+     "AFNetworking pinning class in ObjC metadata."),
+    (re.compile(r"\bServerTrustPolicy\b|\bServerTrustEvaluating\b|"
+                r"\bPinnedCertificatesTrustEvaluator\b|\bPublicKeysTrustEvaluator\b|"
+                r"\bDisabledTrustEvaluator\b|\bRevocationTrustEvaluator\b"),
+     "SSL_PINNING", "high",
+     "Alamofire server-trust evaluator class in ObjC metadata."),
+    (re.compile(r"\bTSKPinningValidator\b|\bTSKTrustEvaluation\b|\bTSKPinnedDomain\b|"
+                r"\bTSKPinningValidatorCallback\b|\bTSKPinningValidator_Result\b"),
+     "SSL_PINNING", "high",
+     "TrustKit pinning validator class in ObjC metadata."),
+    (re.compile(r"\bAACertificatePinner\b|\bHPJPNetworkClient\b|\bSSLPinningDelegate\b|"
+                r"\bRNSslPinning\b|\bOspreyGRPCChannel\b|\bSDHTTPClient\b|"
+                r"\bMNBaseHTTPClient\b|\bReactNativeBlobUtilRequest\b"),
+     "SSL_PINNING", "high",
+     "Known app-specific NSURLSession pinning delegate in ObjC metadata."),
+    (re.compile(r"\bshouldTrustProtectionSpace(?::CertificateInformation:)?\b|"
+                r"\bevaluateServerTrust:forDomain:\b|\btrustProtectionSpace:\b"),
+     "SSL_PINNING", "high",
+     "Hand-rolled trust-evaluation selector in ObjC metadata."),
+    (re.compile(r"\bURLSession:didReceiveChallenge:completionHandler:\b"),
+     "SSL_PINNING", "high",
+     "NSURLSession pinning delegate selector in ObjC metadata."),
+    (re.compile(r"\bwebView:didReceiveAuthenticationChallenge:completionHandler:\b|"
+                r"\bwebView:decidePolicyForNavigationAction:decisionHandler:\b"),
+     "SSL_PINNING", "medium",
+     "WKWebView auth-challenge selector in ObjC metadata."),
+
+    # ---- MITM proxy clients ----
+    (re.compile(r"\b(Charles|Proxyman|BurpSuite|HTTPToolkit|Fiddler|Requestly)\b|"
+                r"\bchls\.pro\b|\bproxyman\.io\b|\bmitm\.it\b|\bburpsuite\.com\b",
+                re.IGNORECASE), "SSL_PINNING", "high",
+     "MITM proxy client name/url in ObjC metadata (likely a blocklist)."),
+
+    # ---- Comprehensive MDM vendor SDKs (ObjC class names) ----
+    (re.compile(r"AirWatch|AWSDK|AWController|AWServer|AWEnrollment|WorkspaceONE|"
+                r"VMwareWorkspace", re.IGNORECASE), "MDM_CHECK", "high",
+     "VMware AirWatch / Workspace ONE SDK in ObjC metadata."),
+    (re.compile(r"IntuneMAM|IntuneAppSDK|IntuneSDK|IntuneAttestation|IntuneCA|"
+                r"MSAL(?:[A-Z][a-zA-Z0-9]*)?|ADAL(?:[A-Z][a-zA-Z0-9]*)?",
+                re.IGNORECASE), "MDM_CHECK", "high",
+     "Microsoft Intune App SDK / MSAL / ADAL in ObjC metadata."),
+    (re.compile(r"MobileIron|AppConnect|MIAppConnect|AppStation|Ivanti(?:Neurons|SDK)?",
+                re.IGNORECASE), "MDM_CHECK", "high",
+     "MobileIron / Ivanti AppConnect SDK in ObjC metadata."),
+    (re.compile(r"MaaS360(?:[A-Z][a-zA-Z0-9]*)?|IBMMaaS360", re.IGNORECASE),
+     "MDM_CHECK", "high",
+     "IBM MaaS360 Mobile App SDK in ObjC metadata."),
+    (re.compile(r"Hexnode|SOTIMobiControl|SOTIAgent|Scalefusion|Miradore|"
+                r"ManageEngineMDM|CitrixEndpointManagement|XenMobile|CTXMobileSDK",
+                re.IGNORECASE), "MDM_CHECK", "high",
+     "Hexnode / SOTI / Scalefusion / Citrix MDM SDK in ObjC metadata."),
+    (re.compile(r"BlackBerryUEM|BlackBerryDynamics|GoodDynamics|GDRuntime|GDiOS|"
+                r"BBDynamics", re.IGNORECASE), "MDM_CHECK", "high",
+     "BlackBerry UEM / Dynamics (Good) SDK in ObjC metadata."),
+    (re.compile(r"Jamf(?:SDK|Pro|Agent)?|KandjiMDM|MosyleAuth|MosyleRuntime|AddigyAgent",
+                re.IGNORECASE), "MDM_CHECK", "high",
+     "Apple-ecosystem MDM vendor SDK (Jamf / Kandji / Mosyle / Addigy)."),
+    (re.compile(r"UIManagedConfiguration|ManagedAppConfig|com\.apple\.configuration\.managed|"
+                r"com\.apple\.feedback\.managed"), "MDM_CHECK", "high",
+     "Apple Managed App Configuration key in ObjC metadata."),
+    (re.compile(r"NEHotspotHelper|NEVPNManager|NEDNSSettingsManager|"
+                r"NETunnelProviderManager", re.IGNORECASE), "MDM_CHECK", "medium",
+     "NetworkExtension class -- usually gated by MDM entitlement."),
+
+    # ---- Keychain / data-protection weakness ----
+    (re.compile(r"kSecAttrAccessibleAlways|kSecAttrAccessibleAlwaysThisDeviceOnly"),
+     "HARDCODED_SECRETS", "high",
+     "Keychain item accessible without unlock (weakest class)."),
+    (re.compile(r"NSFileProtectionNone"), "HARDCODED_SECRETS", "high",
+     "NSFileProtectionNone -- file plaintext at rest."),
+    (re.compile(r"\bLAContext\b|\bLocalAuthentication\b|\bevaluatePolicy\b|"
+                r"\bdeviceOwnerAuthentication(?:WithBiometrics)?\b"),
+     "INTEGRITY_CHECK", "medium",
+     "LocalAuthentication (biometric) gate in ObjC metadata."),
+
+    # ---- Integrity / code-signing (ObjC) ----
+    (re.compile(r"SecCodeCheckValidity|SecStaticCodeCheckValidity|"
+                r"SecCodeCopySigningInformation|SecRequirementCreateWithString|"
+                r"SecCodeCopyGuestWithAttributes"), "INTEGRITY_CHECK", "high",
+     "Security.framework code-signing validation API in ObjC metadata."),
+    (re.compile(r"\bcsops\b|\bCS_HARD\b|\bCS_KILL\b|\bCS_RESTRICT\b|\bCS_PLATFORM_BINARY\b|"
+                r"\bCS_FORCED_LV\b|\bCS_VALID\b|\bCS_ADHOC\b|\bCS_GET_TASK_ALLOW\b"),
+     "INTEGRITY_CHECK", "high",
+     "csops syscall / code-signing status flag in ObjC metadata."),
+
+    # ---- Anti-debug extras ----
+    (re.compile(r"PT_DENY_ATTACH|ptrace\s*\(\s*31"), "ANTI_DEBUG", "high",
+     "Explicit PT_DENY_ATTACH ptrace() call in ObjC metadata."),
+    (re.compile(r"mach_task_self|task_for_pid|thread_create_running"),
+     "ANTI_DEBUG", "medium",
+     "Mach task API -- task-level debugger detection."),
+    (re.compile(r"\bsvc\s+0x80\b|__asm__.*svc.*0x80"), "ANTI_DEBUG", "high",
+     "Raw ARM64 svc 0x80 syscall (bypass libc)."),
+
+    # ---- Anti-hook extras ----
+    (re.compile(r"FridaGadget|libFridaGadget|frida-gum|gumjscript|gum-js-loop|"
+                r"gmain|frida-agent", re.IGNORECASE), "ANTI_HOOK", "high",
+     "Frida gadget / gum runtime string in ObjC metadata."),
+    (re.compile(r"objection", re.IGNORECASE), "ANTI_HOOK", "high",
+     "Objection string in ObjC metadata."),
+    (re.compile(r"libhooker|ellekit|roothide|libsubstitute|choicy|rocketbootstrap|"
+                r"libblackjack|libroot|tweakinject|libinjector", re.IGNORECASE),
+     "ANTI_HOOK", "high",
+     "Rootless-JB infrastructure name in ObjC metadata."),
+    (re.compile(r"DYLD_INSERT_LIBRARIES"), "ANTI_HOOK", "high",
+     "DYLD_INSERT_LIBRARIES environment-variable check in ObjC metadata."),
+    (re.compile(r"__RESTRICT.*__restrict"), "ANTI_HOOK", "medium",
+     "__RESTRICT segment -- blocks DYLD_INSERT_LIBRARIES injection."),
+
+    # ---- Rooted/jailbroken URL schemes queried via canOpenURL ----
+    (re.compile(r"\bcydia://|\bsileo://|\bzbra://|\bzebra://|\bundecimus://|"
+                r"\bfilza://|\bactivator://|\bcheckra1n://|\bpalera1n://"),
+     "ROOT_DETECTION", "high",
+     "Jailbreak URL scheme in ObjC metadata (canOpenURL target)."),
+
+    # ---- Known JB paths in __objc_methname (unusual but seen) ----
+    (re.compile(r"/Applications/Cydia\.app|/Library/MobileSubstrate|/bin/bash|"
+                r"/usr/sbin/sshd|/var/jb|/private/var/stash|/var/lib/apt"),
+     "ROOT_DETECTION", "high",
+     "Jailbreak path string literal in ObjC metadata."),
+
+    # ---- Simulator / TestFlight / XCTest ----
+    (re.compile(r"SIMULATOR_DEVICE_NAME|SIMULATOR_MODEL_IDENTIFIER|DYLD_ROOT_PATH"),
+     "EMULATOR_DETECT", "high",
+     "Simulator environment variable name in ObjC metadata."),
+    (re.compile(r"XCTestCase|XCTestBundle|XCUIApplication|xctestrun"),
+     "EMULATOR_DETECT", "medium",
+     "XCTest harness reference in ObjC metadata."),
+    (re.compile(r"TestFlight|iTunesStore\.app"), "EMULATOR_DETECT", "low",
+     "TestFlight / iTunes Store reference in ObjC metadata."),
 ]
 
 
