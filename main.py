@@ -302,17 +302,18 @@ def _run_ipa_pipeline(args, apk_path, out_dir):
     security_model = None
     frida_json_name = frida_prompt_name = None
     if args.frida_brief or args.mindmap:
-        print("[*] Building AI security model / interactive mind map (accelerated) ...")
-        from security_model import build_security_model
-        json_path, prompt_path, security_model = build_security_model(
+        print("[*] Building AI security model / interactive mind map (iOS, accelerated) ...")
+        # iOS pipeline: use the iOS-aware model so hook hints are ObjC/Swift-shaped
+        # (Java.use spelling would be useless on an IPA target).
+        from ios_security_model import build_ios_security_model
+        json_path, prompt_path, security_model = build_ios_security_model(
             apk_name=apk_path.name,
             source_findings=source_findings,
             native_string_findings=[],
             native_callsite_findings=[],
             warnings=all_warnings,
             out_dir=out_dir,
-            jadx_dir=str(ipa_dir) if ipa_dir else None,
-            apktool_dir=None,
+            ipa_dir=str(ipa_dir) if ipa_dir else None,
             patch_records=None,
         )
         frida_json_name = json_path.name

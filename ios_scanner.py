@@ -828,6 +828,107 @@ _OBJC_SECURITY_PATTERNS = [
     (re.compile(r"Promon|Arxan|Appdome|Zimperium|Guardsquare|iXGuard|Approov|"
                 r"DexGuard|ixGuard", re.IGNORECASE), "RASP_DETECTION", "high",
      "Known RASP vendor class/symbol detected in ObjC metadata."),
+
+    # ======================================================================
+    # High-value iOS chokepoints discovered during live AU 0101 bypass work
+    # (AppProtecttXC + Mobeix). Each one is either (a) a verdict-dispatch
+    # entry whose neutralisation disables an entire upstream detector chain,
+    # or (b) a terminal action -- hooking these matters far more than hooking
+    # per-detector methods. See walkthrough.md / BYPASS_METHODOLOGY.md.
+    # ======================================================================
+
+    # ---- AppProtecttXC commercial RASP (ObjC-visible verdict surface) ----
+    (re.compile(r"AppProtectt(?:XC|Handler|Implementation|ResponseObject|"
+                r"ServiceManager|BottomViewController|SentinelClass|"
+                r"RuleResultHandler|CallBackHandler|AdaptiveHandler|HarmFullHandler)",
+                re.IGNORECASE), "RASP_DETECTION", "high",
+     "AppProtecttXC RASP framework class in ObjC metadata."),
+    (re.compile(r"closeVulnerabilityWithUpdatedRuleId|closeVulnerability"),
+     "ENFORCEMENT", "high",
+     "AppProtecttXC verdict-dispatch entry (calls exit) -- primary ENFORCEMENT chokepoint."),
+    (re.compile(r"ATSRuleForwardPayload|threatDetectedFlag|setThreatDetectedFlag"),
+     "ENFORCEMENT", "high",
+     "AppProtecttXC ATSRuleForwardPayload verdict flag (ObjC-reachable; pin to 0)."),
+    (re.compile(r"vulnerabilityForceAccept|shouldRemoveVulnerability|"
+                r"vulnerabilityActionRequired"), "ENFORCEMENT", "high",
+     "AppProtecttXC AppProtecttResponseObject verdict getter (force 'proceed')."),
+    (re.compile(r"displayErrorViewWithTitle|createJailBreakErrorView"),
+     "ENFORCEMENT", "high",
+     "RASP popup / jailbreak sheet builder (reaction dispatcher)."),
+    (re.compile(r"infoviewSkipButtonTapped|infoViewBackButtonTapped|"
+                r"overAllSkipVulnerabilityButtonTapped|handleCloseAppAction"),
+     "ENFORCEMENT", "high",
+     "RASP jailbreak-sheet button handlers (route to dismiss, not exit)."),
+    # Pure-Swift detectors inside AppProtecttXC. Flag them so the model can note
+    # they are unreachable from ObjC Interceptor and require a static patch.
+    (re.compile(r"JailbreakPathChecker|DylibInjectionDetector|MethodSwizzleDetector|"
+                r"RuntimeSwizzleInspector|BotDetectionEngine|CertificateChainDetector|"
+                r"CodeSignatureChecker|RuntimeIntegrityChecker|VPhoneHardwareProvider|"
+                r"ToolingProbe|FishHookDetector|AppProtecttjailbreakdetect"),
+     "RASP_DETECTION", "high",
+     "AppProtecttXC Swift detector class (likely pure-Swift -- ObjC Interceptor "
+     "will not reach it; static framework patch may be required)."),
+
+    # ---- Mobeix (Mx_*) in-app jailbreak gate ---------------------------------
+    (re.compile(r"\bMx_(DeviceHardware|AppManager|ApplicationWrapper|SecuredData|"
+                r"BaseHTTPClient|CommunicationManager|Notification)\b"),
+     "ROOT_DETECTION", "high",
+     "Mobeix (Mx_*) in-app security class."),
+    (re.compile(r"\bisRootedDevice\b|\bblockRootedDevice\b|\bblockDebugModeDevices\b|"
+                r"\bisDebugModeEnable\b"), "ROOT_DETECTION", "high",
+     "Mobeix root/debug gate selector (force NO)."),
+    (re.compile(r"getApplicationShouldBlock(Rooted|DebugMode|NonPhysical)Devices"),
+     "ROOT_DETECTION", "high",
+     "Mobeix 'should block' config getter (force NO)."),
+    (re.compile(r"setDeviceSecurityCheckLevel|setDeviceSecurityCheckServices"),
+     "RASP_DETECTION", "medium",
+     "Mobeix device-security-check configuration (observe polarity before forcing)."),
+
+    # ---- Hand-rolled SSL pinning in the main binary --------------------------
+    (re.compile(r"shouldTrustProtectionSpace(?::CertificateInformation:)?"),
+     "SSL_PINNING", "high",
+     "Hand-rolled trust evaluation entry -- force YES. Owned by multiple Mx_ classes "
+     "and sometimes an AppProtecttXC delegate; hook with ApiResolver -[* ...]."),
+    (re.compile(r"setAuthenticateSSLCertificate"), "SSL_PINNING", "high",
+     "Mobeix authenticate-SSL toggle (observe/force)."),
+
+    # ---- NSURLSession challenge handlers (every app delegate implementing this
+    # method is a pinning site; the real fix is disposition=0, not 1).
+    (re.compile(r"URLSession:didReceiveChallenge:completionHandler:"),
+     "SSL_PINNING", "high",
+     "NSURLSession pinning delegate -- replace to respond with disposition 0 "
+     "(UseCredential) + credentialForTrust:. Passing 1 (PerformDefaultHandling) "
+     "re-runs the app's pinning and fails with -1202."),
+
+    # ---- BoringSSL (gRPC / HTTP2 bypasses SecTrust*). The REAL -1202 fix is to
+    # REPLACE custom_verify with ssl_verify_ok, not no-op it.
+    (re.compile(r"SSL_(CTX_)?set_custom_verify|SSL_(CTX_)?set_verify|"
+                r"SSL_get_verify_result"), "SSL_PINNING", "high",
+     "BoringSSL custom_verify / legacy verify API -- replace callback with "
+     "ssl_verify_ok (0); no-oping it drops to default validation and rejects proxy CA."),
+
+    # ---- UIKit scene / UIApplication exit chokepoints ------------------------
+    (re.compile(r"workspaceShouldExit|terminateWithSuccess|_terminateWithStatus:|"
+                r"forceExitWithTransitionContext"), "ENFORCEMENT", "high",
+     "UIKit exit chokepoint. DO NOT blanket-hook _evalTransitionToSettings... "
+     "(wedges UIKit); block only these specific selectors."),
+
+    # ---- libc / Mach termination family (reach via Module.findExportByName) --
+    (re.compile(r"\b(exit_group|pthread_exit|__exit|task_terminate|thread_terminate)\b"),
+     "ENFORCEMENT", "medium",
+     "libc / Mach termination symbol seen in metadata."),
+
+    # ---- Rootless-JB infrastructure (hide from DylibInjectionDetector) -------
+    (re.compile(r"libinjector|ellekit|roothide|libhooker|/var/jb|/var/LIB|TrollStore",
+                re.IGNORECASE), "ANTI_HOOK", "medium",
+     "Rootless-JB infrastructure reference -- used by dyld image enumeration "
+     "detectors to catch injected tweaks."),
+
+    # ---- React Native networking (traffic capture surface) -------------------
+    (re.compile(r"RCTNetworking|RCTHTTPRequestHandler|RNGetRandomValues"),
+     "SSL_PINNING", "low",
+     "React Native networking entry -- useful for request capture (sendRequest:"
+     "responseSender:) and CSPRNG key correlation."),
 ]
 
 
